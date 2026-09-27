@@ -1,0 +1,105 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Outfit", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Fraunces", Georgia, "Times New Roman", serif;
+  --color-bg: #f3efe6;
+  --color-surface: #fffdf8;
+  --color-ink: #1c1914;
+  --color-muted: #6e675c;
+  --color-line: #e4dcd0;
+  --color-accent: #0e6b52;
+  --color-accent-soft: #e4f2ec;
+}
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    background: var(--color-bg);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    min-height: 100vh;
+  }
+
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+  }
+
+  p {
+    text-wrap: pretty;
+  }
+
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+
+  ::selection {
+    background: var(--color-accent-soft);
+    color: var(--color-ink);
+  }
+
+  mark {
+    background: var(--color-accent-soft);
+    color: var(--color-ink);
+  }
+}
+
+@keyframes folio-slide {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(320%);
+  }
+}
+
+.folio-bar {
+  animation: folio-slide 1.1s ease-in-out infinite;
+}
+
+@keyframes folio-peek-up {
+  from {
+    transform: translateY(1.25rem);
+  }
+  to {
+    transform: none;
+  }
+}
+
+@keyframes folio-peek-side {
+  from {
+    transform: translateX(1.5rem);
+  }
+  to {
+    transform: none;
+  }
+}
+
+.folio-peek {
+  animation: folio-peek-up 180ms ease-out;
+}
+
+@media (min-width: 640px) {
+  .folio-peek {
+    animation-name: folio-peek-side;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .folio-bar {
+    animation: none;
+    transform: none;
+    width: 100%;
+  }
+
+  .folio-peek {
+    animation: none;
+  }
+}
