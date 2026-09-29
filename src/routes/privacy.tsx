@@ -60,6 +60,10 @@ function PrivacyPage() {
             sources you have on to get results. Folio does not save your searches in a database.
           </li>
           <li>
+            AI answers are off unless you turn them on. Only then does your search, with the top
+            results, go to xAI.
+          </li>
+          <li>
             Your source settings and recent searches are kept in your browser, not on our server.
           </li>
           <li>
@@ -89,6 +93,11 @@ function PrivacyPage() {
             Grokipedia is on.
           </li>
           <li>
+            <span className="font-medium">xAI</span>: your search, plus the titles, snippets, and
+            addresses of the top Web, Wikipedia, and Grokipedia results, to write the AI answer, only
+            when AI is on. xAI handles that request under its own API terms and privacy policy.
+          </li>
+          <li>
             <span className="font-medium">Datamuse</span>: short definitions for words in your
             search.
           </li>
@@ -111,7 +120,8 @@ function PrivacyPage() {
           <span className="font-mono">/?q=…</span>), so it appears in your browser history and in
           the address you share if you copy the link. The public search endpoint at{" "}
           <span className="font-mono">/api/search</span> works the same way. The query is in the
-          address, and results come from the same services.
+          address, and results come from the same services. It sends the query to xAI only when the
+          address asks for an AI answer (<span className="font-mono">ai=1</span>).
         </p>
 
         <h2 className="pt-2 font-display text-2xl">What stays in your browser</h2>
@@ -219,6 +229,7 @@ function PrivacyPage() {
         <h2 className="pt-2 font-display text-2xl">Your choices</h2>
         <ul className="grid list-disc gap-2 pl-5">
           <li>Turn Wikipedia, Grokipedia, or Images off so a search skips them.</li>
+          <li>Leave AI off so your search is never sent to xAI.</li>
           <li>Clear Recent, or clear this site’s data in your browser.</li>
           <li>Leave sponsored listings off.</li>
           <li>
