@@ -24,6 +24,8 @@ export type FolioSearch = {
   grok?: boolean;
   /** Images is opt-in: absent means off. */
   images?: boolean;
+  /** AI is opt-in too: absent means off. It is not a loader dep, because it never changes the search itself. */
+  ai?: boolean;
   webPage?: number;
   wikiPage?: number;
   grokPage?: number;
@@ -49,6 +51,7 @@ export const Route = createFileRoute("/")({
     wiki: flag(raw.wiki),
     grok: flag(raw.grok),
     images: flag(raw.images),
+    ai: flag(raw.ai),
     webPage: pageOf(raw.webPage),
     wikiPage: pageOf(raw.wikiPage),
     grokPage: pageOf(raw.grokPage),
