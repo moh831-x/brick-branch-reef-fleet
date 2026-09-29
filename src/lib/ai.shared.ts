@@ -4,7 +4,43 @@
  * so the browser bundle and the tests can import it.
  */
 
-export type AiSourceId = "web" | "wiki" | "grok";
+export type AiSourceId = "web" | "wiki" | "grok" | "images";
+
+/** The AI providers Folio can ask, in fallback order. The id is what goes in the address (`ai_model=`). */
+export type AiProviderId = "grok" | "openai" | "claude";
+
+export const AI_PROVIDERS: ReadonlyArray<{ id: AiProviderId; label: string; company: string }> = [
+  { id: "grok", label: "Grok", company: "xAI" },
+  { id: "openai", label: "ChatGPT", company: "OpenAI" },
+  { id: "claude", label: "Claude", company: "Anthropic" },
+];
+
+export function aiProviderOf(value: unknown): AiProviderId | undefined {
+  if (typeof value !== "string") return undefined;
+  const id = value.trim().toLowerCase();
+  return AI_PROVIDERS.some((provider) => provider.id === id) ? (id as AiProviderId) : undefined;
+}
+
+export function aiProviderLabel(id: AiProviderId): string {
+  return AI_PROVIDERS.find((provider) => provider.id === id)?.label ?? id;
+}
+
+/**
+ * Which providers to try, in order: the one the reader picked (when it is set up), then every other
+ * set-up provider in the order Grok, ChatGPT, Claude.
+ */
+export function aiProviderOrder(preferred: AiProviderId | undefined, available: readonly AiProviderId[]): AiProviderId[] {
+  const ordered = AI_PROVIDERS.map((provider) => provider.id).filter((id) => available.includes(id));
+  if (!preferred || !ordered.includes(preferred)) return ordered;
+  return [preferred, ...ordered.filter((id) => id !== preferred)];
+}
+
+/** What the selector shows as chosen: the reader's pick when it is set up, otherwise the first set-up provider. */
+export function selectedAiProvider(preferred: AiProviderId | undefined, available: readonly AiProviderId[]): AiProviderId | undefined {
+  return aiProviderOrder(preferred, available)[0];
+}
+
+export type AiProviderStatus = { id: AiProviderId; label: string; available: boolean; model?: string };
 
 /** One search result handed to the model as context. */
 export type AiContextItem = {
@@ -26,19 +62,32 @@ export type AiCitation = {
 export type AiPart = { text: string } | { cite: number };
 
 export type AiAnswer =
-  | { status: "ok"; text: string; parts: AiPart[]; citations: AiCitation[]; model: string }
-  | { status: "unconfigured" | "no-context" | "error"; message: string };
+  | {
+      status: "ok";
+      text: string;
+      parts: AiPart[];
+      citations: AiCitation[];
+      model: string;
+      /** The provider that actually answered. */
+      provider: AiProviderId;
+      /** The provider the reader asked for, when there was one. */
+      requested?: AiProviderId;
+      /** Set-up providers that were tried first and failed. */
+      failed: AiProviderId[];
+    }
+  | { status: "unconfigured" | "no-context" | "error"; message: string; failed?: AiProviderId[] };
 
 export const AI_MESSAGES = {
   unconfigured: "AI answers aren’t set up yet.",
-  noContext: "AI answers need Web, Wikipedia, or Grokipedia results to work from.",
+  noContext: "AI answers need results from at least one source to work from.",
   error: "The AI answer didn’t load. The other sources still ran.",
   empty: "The AI didn’t return an answer for this search.",
 } as const;
 
 /** How many results each source contributes, and the overall cap. */
-const PER_SOURCE: Record<AiSourceId, number> = { web: 5, wiki: 3, grok: 3 };
-export const AI_MAX_CONTEXT = 10;
+const PER_SOURCE: Record<AiSourceId, number> = { web: 5, wiki: 3, grok: 3, images: 3 };
+export const AI_MAX_CONTEXT = 12;
+const CONTEXT_SOURCES = ["web", "wiki", "grok", "images"] as const;
 const TITLE_MAX = 180;
 const SNIPPET_MAX = 400;
 
@@ -58,12 +107,21 @@ function httpUrl(value: string): string | null {
 
 type Hit = { title: string; url: string; snippet: string };
 
+function hostOf(value: string): string {
+  try {
+    return new URL(value).hostname.replace(/^www\./, "");
+  } catch {
+    return "";
+  }
+}
+
 /**
- * The top results from each text source, interleaved so the model sees Web, Wikipedia,
- * and Grokipedia near the top, deduped by address.
+ * The top results from every source that is on (Web, Wikipedia, Grokipedia, and Images),
+ * interleaved so each source shows up near the top, deduped by address. Image results carry
+ * their title and the page they were found on, since there is no text snippet.
  */
 export function pickAiContext(blocks: Partial<Record<AiSourceId, { results: Hit[] }>>): AiContextItem[] {
-  const pools = (["web", "wiki", "grok"] as const).map((source) => ({
+  const pools = CONTEXT_SOURCES.map((source) => ({
     source,
     hits: (blocks[source]?.results ?? []).slice(0, PER_SOURCE[source]),
   }));
@@ -74,7 +132,8 @@ export function pickAiContext(blocks: Partial<Record<AiSourceId, { results: Hit[
     for (const pool of pools) {
       const hit = pool.hits[index];
       if (!hit) continue;
-      const item = cleanContextItem({ source: pool.source, title: hit.title, url: hit.url, snippet: hit.snippet });
+      const snippet = pool.source === "images" && !hit.snippet ? `Image found on ${hostOf(hit.url)}` : hit.snippet;
+      const item = cleanContextItem({ source: pool.source, title: hit.title, url: hit.url, snippet });
       if (!item || seen.has(item.url)) continue;
       seen.add(item.url);
       picked.push(item);
@@ -88,7 +147,7 @@ export function pickAiContext(blocks: Partial<Record<AiSourceId, { results: Hit[
 export function cleanContextItem(raw: unknown): AiContextItem | null {
   if (typeof raw !== "object" || raw === null) return null;
   const value = raw as Record<string, unknown>;
-  const source = value.source === "web" || value.source === "wiki" || value.source === "grok" ? value.source : null;
+  const source = (CONTEXT_SOURCES as readonly unknown[]).includes(value.source) ? (value.source as AiSourceId) : null;
   const title = typeof value.title === "string" ? tidy(value.title, TITLE_MAX) : "";
   const url = typeof value.url === "string" ? httpUrl(value.url) : null;
   const snippet = typeof value.snippet === "string" ? tidy(value.snippet, SNIPPET_MAX) : "";
@@ -96,7 +155,7 @@ export function cleanContextItem(raw: unknown): AiContextItem | null {
   return { source, title, url, snippet };
 }
 
-const SOURCE_NAME: Record<AiSourceId, string> = { web: "Web", wiki: "Wikipedia", grok: "Grokipedia" };
+const SOURCE_NAME: Record<AiSourceId, string> = { web: "Web", wiki: "Wikipedia", grok: "Grokipedia", images: "Images" };
 
 export const AI_SYSTEM_PROMPT = [
   "You write the short answer at the top of a search results page.",

@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { GROK_PAGE, IMAGES_PAGE, MAX_PAGE, PAGE, WEB_PAGE } from "./search.shared";
-import { AI_MAX_CONTEXT, cleanContextItem, type AiAnswer, type AiContextItem } from "./ai.shared";
-import { runAiAnswer } from "./ai.server";
+import { AI_MAX_CONTEXT, aiProviderOf, cleanContextItem, type AiAnswer, type AiContextItem, type AiProviderStatus } from "./ai.shared";
+import { aiProviderStatus, runAiAnswer } from "./ai.server";
 import { runNetworkAd, runPreview, runSearch, runSuggest, runTrending, type HitPreview, type NetworkAd, type SearchInput, type SearchPayload, type SourceId, type Suggestion, type Trend } from "./search.server";
 
 export type { HitPreview, ImageRef, LeadCard, NetworkAd, PlaceRef, SearchHit, SearchInput, SearchPayload, SourceBlock, SourceId, Suggestion, Trend, WordDefinition, WordSense } from "./search.server";
@@ -42,8 +42,9 @@ export const searchAll = createServerFn({ method: "POST" })
 
 /**
  * The optional AI answer. The browser calls this only when the AI switch is on, after the
- * other sources have loaded, and passes the top results it already has as context, so the
- * search is not fetched twice and the other sources never wait on the model.
+ * other sources have loaded, and passes the top results it already has as context (from every
+ * source that is on), so the search is not fetched twice and the other sources never wait on
+ * the model. `provider` is the reader's pick; the server falls back to the next set-up provider.
  */
 export const answerWithAi = createServerFn({ method: "POST" })
   .validator((input: unknown) => {
@@ -59,9 +60,14 @@ export const answerWithAi = createServerFn({ method: "POST" })
       seen.add(clean.url);
       context.push(clean);
     }
-    return { q, context };
+    return { q, context, provider: aiProviderOf(raw.provider) };
   })
-  .handler(async ({ data }): Promise<AiAnswer> => runAiAnswer(data.q, data.context));
+  .handler(async ({ data }): Promise<AiAnswer> => runAiAnswer(data.q, data.context, data.provider));
+
+/** Which AI providers have a key on the server, for the provider selector. No keys are returned. */
+export const listAiProviders = createServerFn({ method: "POST" })
+  .validator(() => ({}))
+  .handler(async (): Promise<AiProviderStatus[]> => aiProviderStatus());
 
 export const suggestQueries = createServerFn({ method: "POST" })
   .validator((input: unknown) => {

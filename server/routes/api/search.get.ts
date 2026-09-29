@@ -25,8 +25,17 @@ function block(source: SourceBlock) {
 }
 
 function aiBlock(answer: AiAnswer) {
-  if (answer.status !== "ok") return { status: answer.status, message: answer.message };
-  return { status: answer.status, model: answer.model, text: answer.text, citations: answer.citations };
+  if (answer.status !== "ok") {
+    return { status: answer.status, message: answer.message, ...(answer.failed?.length ? { failed: answer.failed } : {}) };
+  }
+  return {
+    status: answer.status,
+    provider: answer.provider,
+    model: answer.model,
+    ...(answer.failed.length ? { failed: answer.failed } : {}),
+    text: answer.text,
+    citations: answer.citations,
+  };
 }
 
 export default async function searchRoute(event: { url: URL }): Promise<Response> {
@@ -36,8 +45,8 @@ export default async function searchRoute(event: { url: URL }): Promise<Response
   }
   try {
     const data = await runSearch({ ...parsed, card: false, near: "" });
-    // The query goes to the AI provider only when the caller asked for ai=1.
-    const ai = parsed.ai ? aiBlock(await runAiAnswer(data.query, pickAiContext(data))) : null;
+    // The query goes to an AI provider only when the caller asked for ai=1.
+    const ai = parsed.ai ? aiBlock(await runAiAnswer(data.query, pickAiContext(data), parsed.aiModel)) : null;
     return Response.json(
       {
         query: data.query,
