@@ -5,6 +5,7 @@ Folio is the web search page at https://www.zip1.ai/. A query can include web re
 - [Search](https://www.zip1.ai/): the search box
 - [About](https://www.zip1.ai/about): what Folio by Zip1 is
 - [How to search](https://www.zip1.ai/how-to-search): the search box, source switches, results, and page controls
+- [Privacy policy](https://www.zip1.ai/privacy): what Folio sends to its server and search sources, and what stays in the browser
 
 Addresses that contain a search query are the same search page, not separate articles.
 
