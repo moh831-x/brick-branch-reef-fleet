@@ -1,8 +1,8 @@
 import { createServerFn } from "@tanstack/react-start";
-import { GROK_PAGE, MAX_PAGE, PAGE } from "./search.shared";
-import { runPreview, runSearch, runSuggest, runTrending, type HitPreview, type SearchInput, type SearchPayload, type SourceId, type Suggestion, type Trend } from "./search.server";
+import { GROK_PAGE, MAX_PAGE, PAGE, WEB_PAGE } from "./search.shared";
+import { runNetworkAd, runPreview, runSearch, runSuggest, runTrending, type HitPreview, type NetworkAd, type SearchInput, type SearchPayload, type SourceId, type Suggestion, type Trend } from "./search.server";
 
-export type { HitPreview, LeadCard, PlaceRef, SearchHit, SearchInput, SearchPayload, SourceBlock, SourceId, Suggestion, Trend, WordDefinition, WordSense } from "./search.server";
+export type { HitPreview, LeadCard, NetworkAd, PlaceRef, SearchHit, SearchInput, SearchPayload, SourceBlock, SourceId, Suggestion, Trend, WordDefinition, WordSense } from "./search.server";
 
 function bool(value: unknown, fallback: boolean): boolean {
   if (typeof value === "boolean") return value;
@@ -11,7 +11,7 @@ function bool(value: unknown, fallback: boolean): boolean {
 
 function offsetOf(value: unknown): number {
   if (typeof value !== "number" || !Number.isFinite(value)) return 0;
-  return Math.max(0, Math.min((MAX_PAGE - 1) * Math.max(PAGE, GROK_PAGE), Math.floor(value)));
+  return Math.max(0, Math.min((MAX_PAGE - 1) * Math.max(PAGE, GROK_PAGE, WEB_PAGE), Math.floor(value)));
 }
 
 function readSearch(input: unknown): SearchInput {
@@ -43,6 +43,10 @@ export const suggestQueries = createServerFn({ method: "POST" })
     return { q };
   })
   .handler(async ({ data }): Promise<Suggestion[]> => runSuggest(data.q));
+
+export const requestNetworkAd = createServerFn({ method: "POST" })
+  .validator(() => ({}))
+  .handler(async (): Promise<NetworkAd | null> => runNetworkAd());
 
 export const trendingTopics = createServerFn({ method: "POST" })
   .validator(() => ({}))

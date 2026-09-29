@@ -7,12 +7,109 @@ var headers = ((m) => function headersRouteRule(event) {
 	for (const [key, value] of Object.entries(m.options || {})) event.res.headers.set(key, value);
 });
 //#endregion
+//#region src/lib/share-meta.ts
+var SHARE_KEYS = /* @__PURE__ */ new Set([
+	"og:title",
+	"og:description",
+	"og:url",
+	"twitter:title",
+	"twitter:description"
+]);
+function escapeHtml$1(value) {
+	return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll("\"", "&quot;").replaceAll("'", "&#39;");
+}
+function unescapeHtml$1(value) {
+	return value.replaceAll("&lt;", "<").replaceAll("&gt;", ">").replaceAll("&quot;", "\"").replaceAll("&#39;", "'").replaceAll("&amp;", "&");
+}
+function tagAttr(tag, name) {
+	const match = tag.match(new RegExp(`\\b${name}\\s*=\\s*["']([^"']*)["']`, "i"));
+	return match ? unescapeHtml$1(match[1]).trim() : "";
+}
+function canonicalUrl(html) {
+	const tags = html.match(/<link\b[^>]*>/gi) ?? [];
+	for (const tag of tags) {
+		if (tagAttr(tag, "rel").toLowerCase() !== "canonical") continue;
+		const href = tagAttr(tag, "href");
+		try {
+			const url = new URL(href);
+			if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash) continue;
+			return url.toString();
+		} catch {
+			continue;
+		}
+	}
+	return "";
+}
+function documentTitle(html) {
+	const match = html.match(/<title\b[^>]*>([^<]*)<\/title>/i);
+	return match ? unescapeHtml$1(match[1]).trim() : "";
+}
+function metaDescription(html) {
+	const tags = html.match(/<meta\b[^>]*>/gi) ?? [];
+	for (const tag of tags) {
+		if (tagAttr(tag, "name").toLowerCase() !== "description") continue;
+		const content = tagAttr(tag, "content");
+		if (content) return content;
+	}
+	return "";
+}
+function stripShareTags(html) {
+	return html.replace(/<meta\b[^>]*>/gi, (tag) => {
+		const name = (tagAttr(tag, "property") || tagAttr(tag, "name")).toLowerCase();
+		return SHARE_KEYS.has(name) ? "" : tag;
+	});
+}
+/**
+* The platform head injector rewrites share tags from the homepage identity.
+* Indexable pages already carry their own title, description, and canonical.
+* This puts those values back into og/twitter tags after that injector runs.
+* Pages without a canonical, including search queries, are left untouched.
+*/
+function alignShareMeta(html) {
+	const pageUrl = canonicalUrl(html);
+	const title = documentTitle(html);
+	if (!pageUrl || !title) return html;
+	const description = metaDescription(html);
+	const tags = [
+		`<meta property="og:title" content="${escapeHtml$1(title)}">`,
+		description ? `<meta property="og:description" content="${escapeHtml$1(description)}">` : "",
+		`<meta property="og:url" content="${escapeHtml$1(pageUrl)}">`,
+		`<meta name="twitter:title" content="${escapeHtml$1(title)}">`,
+		description ? `<meta name="twitter:description" content="${escapeHtml$1(description)}">` : ""
+	].join("");
+	const next = stripShareTags(html);
+	if (/<head\b[^>]*>/i.test(next)) return next.replace(/<head\b[^>]*>/i, (open) => `${open}${tags}`);
+	return next;
+}
+//#endregion
+//#region server/middleware/00-share-meta.ts
+function isDocument(pathname) {
+	return !pathname.startsWith("/__grok/") && !pathname.startsWith("/api/") && !pathname.startsWith("/@") && !/\.[a-z0-9]+$/i.test(pathname);
+}
+async function shareMetaMiddleware(event, next) {
+	if ((event.req.method ?? "GET").toUpperCase() !== "GET" || !isDocument(event.url.pathname)) return next();
+	const result = await next();
+	if (!(result instanceof Response) || !result.body) return result;
+	if (!String(result.headers.get("content-type") ?? "").includes("text/html")) return result;
+	if (result.headers.get("content-encoding")) return result;
+	const html = alignShareMeta(await result.text());
+	const headers = new Headers(result.headers);
+	headers.delete("content-length");
+	return new Response(html, {
+		status: result.status,
+		statusText: result.statusText,
+		headers
+	});
+}
+//#endregion
 //#region scripts/install-page.html?raw
 var install_page_default = "<!DOCTYPE html>\n<html lang=\"en\" class=\"device-desktop\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta\n      name=\"viewport\"\n      content=\"width=device-width, initial-scale=1, viewport-fit=cover\"\n    />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <meta name=\"theme-color\" content=\"#000000\" />\n    <meta name=\"apple-mobile-web-app-status-bar-style\" content=\"black\" />\n    <meta name=\"apple-mobile-web-app-title\" content=\"{{APP_NAME}}\" />\n    <title>Add {{APP_NAME}} to your Home Screen</title>\n    <link rel=\"manifest\" href=\"/__grok/manifest.webmanifest\" />\n    <link rel=\"apple-touch-icon\" href=\"/__grok/icon-180.png\" />\n    <link rel=\"stylesheet\" href=\"/__grok/install/styles.css\" />\n    <script>\n      (function () {\n        var ua = navigator.userAgent || \"\";\n        var touch = navigator.maxTouchPoints || 0;\n        var isiPad = /iPad/.test(ua) || (/Macintosh/.test(ua) && touch > 1);\n        var isiPhone = /iPhone|iPod/.test(ua);\n        var isIOS = isiPhone || isiPad;\n        var isAndroid = /Android/i.test(ua);\n        var isAndroidPhone = isAndroid && /Mobile/i.test(ua);\n        var isAndroidTablet = isAndroid && !/Mobile/i.test(ua);\n        var minSide = Math.min(screen.width || 0, screen.height || 0);\n        var maxSide = Math.max(screen.width || 0, screen.height || 0);\n\n        var type = \"desktop\";\n        if (isiPhone) type = \"phone\";\n        else if (isiPad || isAndroidTablet) type = \"tablet\";\n        else if (isAndroidPhone) type = \"phone\";\n        else if (touch > 0 && minSide > 0 && minSide <= 500) type = \"phone\";\n        else if (touch > 0 && minSide > 500 && maxSide <= 1400) type = \"tablet\";\n\n        var iosMajor = null;\n        var osToken = null;\n        var safariToken = null;\n        var iphoneOs = ua.match(/iPhone OS (\\d+)[._]/);\n        var ipadOs = ua.match(/CPU OS (\\d+)[._](\\d+) like Mac OS X/);\n        var safariVer = ua.match(/Version\\/(\\d+)[._]/);\n        if (iphoneOs) osToken = parseInt(iphoneOs[1], 10);\n        else if (ipadOs) osToken = parseInt(ipadOs[1], 10);\n        if (isIOS && safariVer) safariToken = parseInt(safariVer[1], 10);\n        if (osToken != null || safariToken != null) {\n          iosMajor = Math.max(osToken || 0, safariToken || 0);\n        }\n\n        var root = document.documentElement;\n        var classes = [\"device-\" + type];\n        if (iosMajor != null) {\n          root.dataset.ios = String(iosMajor);\n          classes.push(iosMajor >= 27 ? \"ios-27-plus\" : \"ios-below-27\");\n        }\n        root.className = classes.join(\" \");\n      })();\n    <\/script>\n  </head>\n  <body>\n    <div class=\"page\">\n      <header class=\"powered\" aria-label=\"Powered by Grok\">\n        <span class=\"powered-by\">Powered by</span>\n        <span class=\"powered-brand\">\n          <img\n            class=\"grok-logo\"\n            src=\"/__grok/install/assets/homescreen/logo-grok.svg\"\n            width=\"14\"\n            height=\"14\"\n            alt=\"\"\n          />\n          <span class=\"powered-grok\">Grok</span>\n        </span>\n      </header>\n\n      <main class=\"content\">\n        <div class=\"ob\" aria-hidden=\"true\">\n          <img\n            class=\"ob-img ob-phone\"\n            src=\"/__grok/install/assets/homescreen/ob-phone.png\"\n            width=\"338\"\n            height=\"294\"\n            alt=\"\"\n          />\n          <img\n            class=\"ob-img ob-ipad\"\n            src=\"/__grok/install/assets/homescreen/ob-ipad.png\"\n            width=\"634\"\n            height=\"294\"\n            alt=\"\"\n          />\n        </div>\n\n        <section class=\"copy\">\n          <h1>Add {{APP_NAME}} to your&nbsp;Home&nbsp;Screen</h1>\n\n          <div class=\"steps\">\n            <p class=\"step step-tap step-ios27\">\n              <span class=\"muted\">Tap</span>\n              <span class=\"glass glass--icon\" aria-hidden=\"true\">\n                <img src=\"/__grok/install/assets/homescreen/glass-puzzle.svg\" width=\"24\" height=\"24\" alt=\"\" />\n              </span>\n              <span class=\"muted loc loc-phone\">in the bottom bar, then</span>\n              <span class=\"muted loc loc-ipad\">in the tool bar, then</span>\n              <span class=\"glass glass--icon\" aria-hidden=\"true\">\n                <img src=\"/__grok/install/assets/homescreen/glass-share.svg\" width=\"24\" height=\"24\" alt=\"\" />\n              </span>\n            </p>\n\n            <p class=\"step step-tap step-ios-legacy\">\n              <span class=\"muted\">Tap</span>\n              <span class=\"glass glass--icon\" aria-hidden=\"true\">\n                <img src=\"/__grok/install/assets/homescreen/glass-share.svg\" width=\"24\" height=\"24\" alt=\"\" />\n              </span>\n              <span class=\"muted loc loc-phone\">in the bottom bar</span>\n              <span class=\"muted loc loc-ipad\">in the tool bar</span>\n            </p>\n\n            <p class=\"step step-select\">\n              <span class=\"muted\">Select</span>\n              <span class=\"add-label\">\n                <img\n                  class=\"plus-icon\"\n                  src=\"/__grok/install/assets/homescreen/plus.svg\"\n                  width=\"16\"\n                  height=\"16\"\n                  alt=\"\"\n                />\n                <span class=\"add-text\">Add to Home Screen</span>\n              </span>\n            </p>\n          </div>\n        </section>\n      </main>\n\n      <main class=\"content content-desktop\">\n        <section class=\"copy\">\n          <h1>Open this link on your iPhone&nbsp;or&nbsp;iPad</h1>\n          <p class=\"desktop-note\">\n            This page shows how to add {{APP_NAME}} to an iOS Home Screen.\n          </p>\n          <a class=\"desktop-open\" href=\"{{APP_URL}}\">Open {{APP_NAME}}</a>\n        </section>\n      </main>\n    </div>\n  </body>\n</html>\n";
 //#endregion
 //#region \0virtual:grok-og-identity
 var grokOgIdentity = { "site": {
-	"title": "Folio",
+	"title": "Folio by Zip1 — Web, Wikipedia & Grokipedia Search",
+	"description": "Search the web with Folio by Zip1. Explore web results and optional Wikipedia and Grokipedia sources from one simple search interface.",
+	"url": "https://www.zip1.ai/",
 	"color": "0E6B52"
 } };
 //#endregion
@@ -457,20 +554,31 @@ var findRouteRules = /* @__PURE__ */ (() => {
 		return r;
 	};
 })();
+var _lazy_2mAPMk = defineLazyEventHandler(() => import("./_routes/api/search.mjs"));
 var _lazy_IO091Z = defineLazyEventHandler(() => import("./_chunks/ssr-renderer.mjs"));
 var findRoute = /* @__PURE__ */ (() => {
-	const data = {
+	const $0 = {
+		route: "/api/search",
+		method: "get",
+		handler: _lazy_2mAPMk
+	}, $1 = {
 		route: "/**",
 		handler: _lazy_IO091Z
 	};
-	return ((_m, p) => {
+	return (m, p) => {
+		if (p.charCodeAt(p.length - 1) === 47) p = p.slice(0, -1) || "/";
+		if (p === "/api/search") {
+			if (m === "GET") return { data: $0 };
+		}
+		let s = p.split("/");
+		s.length;
 		return {
-			data,
-			params: { "_": p.slice(1) }
+			data: $1,
+			params: { "_": s.slice(1).join("/") }
 		};
-	});
+	};
 })();
-var globalMiddleware = [toEventHandler(grokPwaMiddleware)].filter(Boolean);
+var globalMiddleware = [toEventHandler(shareMetaMiddleware), toEventHandler(grokPwaMiddleware)].filter(Boolean);
 //#endregion
 //#region node_modules/nitro/dist/runtime/internal/error/prod.mjs
 var errorHandler = (error, event) => {

@@ -1,5 +1,5 @@
 import { i as __toESM } from "../_runtime.mjs";
-import { S as require_jsx_runtime, X as require_react, _ as lazyRouteComponent, d as Scripts, f as HeadContent, g as Outlet, h as createRouter, v as createFileRoute, x as useRouter, y as createRootRoute } from "../_libs/@tanstack/react-router+[...].mjs";
+import { C as require_jsx_runtime, S as useRouter, Z as require_react, _ as lazyRouteComponent, d as Scripts, f as HeadContent, g as Outlet, h as createRouter, v as createFileRoute, y as createRootRoute } from "../_libs/@tanstack/react-router+[...].mjs";
 import { c as stripSearchParams } from "../_libs/@tanstack/router-core+[...].mjs";
 import { n as TSS_SERVER_FUNCTION, r as getServerFnById, t as createServerFn } from "./ssr.mjs";
 import { n as TriangleAlert } from "../_libs/lucide-react.mjs";
@@ -44,7 +44,7 @@ function pageItems(current, last) {
 	];
 }
 //#endregion
-//#region node_modules/.nitro/vite/services/ssr/assets/router-CdBj_tJo.js
+//#region node_modules/.nitro/vite/services/ssr/assets/router-CEyHGFY9.js
 var import_react = /* @__PURE__ */ __toESM(require_react());
 var import_jsx_runtime = require_jsx_runtime();
 var __defProp = Object.defineProperty;
@@ -348,20 +348,14 @@ function PreviewHostBridge() {
 	}, [router]);
 	return null;
 }
-var styles_default = "/assets/styles-Da7HyarE.css";
-var APP_NAME = "Folio";
-var Route$1 = createRootRoute({
+var styles_default = "/assets/styles-BM9o1CxF.css";
+var Route$3 = createRootRoute({
 	head: () => ({
 		meta: [
 			{ charSet: "utf-8" },
 			{
 				name: "viewport",
 				content: "width=device-width, initial-scale=1"
-			},
-			{ title: APP_NAME },
-			{
-				name: "description",
-				content: "Search the open web, with Wikipedia and Grokipedia as optional sources."
 			},
 			{
 				name: "theme-color",
@@ -429,7 +423,7 @@ function bool(value, fallback) {
 }
 function offsetOf(value) {
 	if (typeof value !== "number" || !Number.isFinite(value)) return 0;
-	return Math.max(0, Math.min(399 * Math.max(8, 12), Math.floor(value)));
+	return Math.max(0, Math.min(399 * Math.max(8, 12, 10), Math.floor(value)));
 }
 function readSearch(input) {
 	if (typeof input !== "object" || input === null) throw new Error("Invalid search");
@@ -453,13 +447,47 @@ var suggestQueries = createServerFn({ method: "POST" }).validator((input) => {
 	if (typeof input !== "object" || input === null) return { q: "" };
 	return { q: "q" in input && typeof input.q === "string" ? input.q.trim().slice(0, 80) : "" };
 }).handler(createSsrRpc("4db12e3702b07f5b92997e190550efb4fd42ea3e28bc0672c1653ecb4768ae0b"));
-createServerFn({ method: "POST" }).validator(() => ({})).handler(createSsrRpc("eec479c118e4a2ca37eb108f6ea71a9e7a8060bdaad367d7f106300463c687fb"));
-var $$splitComponentImporter = () => import("./routes-DNFMaLPt.mjs");
+var requestNetworkAd = createServerFn({ method: "POST" }).validator(() => ({})).handler(createSsrRpc("ae0c5e9e5de7a3f6b71561dc8e4ca3a7d6f03fdd771d14b900ba96571dd6e183"));
+var trendingTopics = createServerFn({ method: "POST" }).validator(() => ({})).handler(createSsrRpc("eec479c118e4a2ca37eb108f6ea71a9e7a8060bdaad367d7f106300463c687fb"));
+var previewHit = createServerFn({ method: "POST" }).validator((input) => {
+	if (typeof input !== "object" || input === null) throw new Error("Invalid preview");
+	const raw = input;
+	const source = raw.source === "web" || raw.source === "wiki" || raw.source === "grok" ? raw.source : null;
+	const title = typeof raw.title === "string" ? raw.title.trim().slice(0, 180) : "";
+	const url = typeof raw.url === "string" ? raw.url.trim().slice(0, 500) : "";
+	const snippet = typeof raw.snippet === "string" ? raw.snippet.slice(0, 600) : "";
+	if (!source || !title || !safePreviewUrl(url)) throw new Error("Invalid preview");
+	return {
+		source,
+		title,
+		url,
+		snippet
+	};
+}).handler(createSsrRpc("f3c92b2951fc2e8fff537b4f93a68c7439f55b87c0a86f94f7d0fd21733fa139"));
+function safePreviewUrl(value) {
+	try {
+		const url = new URL(value);
+		return url.protocol === "http:" || url.protocol === "https:";
+	} catch {
+		return false;
+	}
+}
+var $$splitComponentImporter$2 = () => import("./routes-tzmSxjgN.mjs");
+var HOME_TITLE = "Folio by Zip1 — Web, Wikipedia & Grokipedia Search";
+var HOME_DESCRIPTION = "Search the web with Folio by Zip1. Explore web results and optional Wikipedia and Grokipedia sources from one simple search interface.";
+var HOME_URL = "https://www.zip1.ai/";
+var websiteJsonLd = {
+	"@context": "https://schema.org",
+	"@type": "WebSite",
+	name: "Folio by Zip1",
+	alternateName: "Folio",
+	url: HOME_URL
+};
 function flag(value) {
 	if (value === "0" || value === 0 || value === false || value === "false") return false;
 	if (value === "1" || value === 1 || value === true || value === "true") return true;
 }
-var Route = createFileRoute("/")({
+var Route$2 = createFileRoute("/")({
 	validateSearch: (raw) => ({
 		q: typeof raw.q === "string" ? raw.q.slice(0, 180) : "",
 		near: typeof raw.near === "string" ? raw.near.slice(0, 80) : "",
@@ -495,21 +523,88 @@ var Route = createFileRoute("/")({
 			web: deps.web !== false,
 			wiki: deps.wiki !== false,
 			grok: deps.grok !== false,
-			webOffset: (deps.webPage - 1) * 8,
+			webOffset: (deps.webPage - 1) * 10,
 			wikiOffset: (deps.wikiPage - 1) * 8,
 			grokOffset: (deps.grokPage - 1) * 12,
 			card: true,
 			near: deps.near.trim()
 		} });
 	},
+	head: ({ match }) => {
+		const q = match.search.q.trim();
+		if (q) return { meta: [{ title: `${q} — Folio` }, {
+			name: "robots",
+			content: "noindex, follow"
+		}] };
+		return {
+			meta: [{ title: HOME_TITLE }, {
+				name: "description",
+				content: HOME_DESCRIPTION
+			}],
+			links: [{
+				rel: "canonical",
+				href: HOME_URL
+			}],
+			scripts: [{
+				type: "application/ld+json",
+				children: JSON.stringify(websiteJsonLd)
+			}]
+		};
+	},
+	component: lazyRouteComponent($$splitComponentImporter$2, "component")
+});
+var TITLE$1 = "About Folio by Zip1";
+var $$splitComponentImporter$1 = () => import("./about-BMKMx0YD.mjs");
+var DESCRIPTION$1 = "Folio by Zip1 is a web search page. It lists public web results and can include Wikipedia and Grokipedia when those sources are switched on.";
+var CANONICAL$1 = "https://www.zip1.ai/about";
+var Route$1 = createFileRoute("/about")({
+	head: () => ({
+		meta: [{ title: TITLE$1 }, {
+			name: "description",
+			content: DESCRIPTION$1
+		}],
+		links: [{
+			rel: "canonical",
+			href: CANONICAL$1
+		}]
+	}),
+	component: lazyRouteComponent($$splitComponentImporter$1, "component")
+});
+var TITLE = "How to search with Folio by Zip1";
+var $$splitComponentImporter = () => import("./how-to-search-CW1jRQSI.mjs");
+var DESCRIPTION = "How to use Folio: enter a query, switch Web, Wikipedia, and Grokipedia on or off, open a result, and move between pages.";
+var CANONICAL = "https://www.zip1.ai/how-to-search";
+var Route = createFileRoute("/how-to-search")({
+	head: () => ({
+		meta: [{ title: TITLE }, {
+			name: "description",
+			content: DESCRIPTION
+		}],
+		links: [{
+			rel: "canonical",
+			href: CANONICAL
+		}]
+	}),
 	component: lazyRouteComponent($$splitComponentImporter, "component")
 });
-var rootRouteChildren = { IndexRoute: Route.update({
-	id: "/",
-	path: "/",
-	getParentRoute: () => Route$1
-}) };
-var routeTree = Route$1._addFileChildren(rootRouteChildren)._addFileTypes();
+var rootRouteChildren = {
+	IndexRoute: Route$2.update({
+		id: "/",
+		path: "/",
+		getParentRoute: () => Route$3
+	}),
+	AboutRoute: Route$1.update({
+		id: "/about",
+		path: "/about",
+		getParentRoute: () => Route$3
+	}),
+	HowToSearchRoute: Route.update({
+		id: "/how-to-search",
+		path: "/how-to-search",
+		getParentRoute: () => Route$3
+	})
+};
+var routeTree = Route$3._addFileChildren(rootRouteChildren)._addFileTypes();
 var router_exports = /* @__PURE__ */ __exportAll({ getRouter: () => getRouter });
 function getRouter() {
 	return createRouter({
@@ -518,4 +613,4 @@ function getRouter() {
 	});
 }
 //#endregion
-export { pageItems as i, Route as n, suggestQueries as r, router_exports as t };
+export { previewHit as a, trendingTopics as c, Route$2 as i, pageItems as l, TITLE as n, requestNetworkAd as o, TITLE$1 as r, suggestQueries as s, router_exports as t };

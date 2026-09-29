@@ -1,12 +1,14 @@
-import { useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { Fragment, useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { useNavigate, useRouterState } from "@tanstack/react-router";
 import { ArrowUp, ArrowUpRight, BookOpen, ChevronLeft, ChevronRight, Clock, Compass, Globe, Search, TrendingUp, X } from "lucide-react";
 import type { FolioSearch } from "@/routes/index";
 import {
   previewHit,
+  requestNetworkAd,
   suggestQueries,
   trendingTopics,
   type HitPreview,
+  type NetworkAd,
   type SearchHit,
   type SearchPayload,
   type SourceId,
@@ -15,12 +17,14 @@ import {
   type Trend,
   type WordDefinition,
 } from "@/lib/search.functions";
-import { GROK_PAGE, MAX_PAGE, PAGE, pageItems } from "@/lib/search.shared";
+import { GROK_PAGE, MAX_PAGE, PAGE, WEB_PAGE, pageItems } from "@/lib/search.shared";
+import { SiteFooter } from "@/components/site-footer";
 
 type Sources = { web: boolean; wiki: boolean; grok: boolean };
 
 const STORAGE_SOURCES = "folio-sources";
 const STORAGE_RECENT = "folio-recent";
+const STORAGE_ADS = "folio-ads";
 
 const SOURCE_META: Record<
   SourceId,
@@ -73,6 +77,15 @@ function readRecent(): string[] {
   }
 }
 
+function readAds(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return localStorage.getItem(STORAGE_ADS) === "1";
+  } catch {
+    return false;
+  }
+}
+
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -121,6 +134,13 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
   const [trends, setTrends] = useState<Trend[]>([]);
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(-1);
+  const [chrome, setChrome] = useState<"full" | "hidden" | "search">("full");
+  const [adsOn, setAdsOn] = useState(false);
+  const [adsOpen, setAdsOpen] = useState(false);
+
+  useEffect(() => {
+    setAdsOn(readAds());
+  }, []);
 
   useEffect(() => {
     setDraft(query);
@@ -166,8 +186,26 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
   }, []);
 
   useEffect(() => {
-    document.title = query ? `${query} — Folio` : "Folio";
+    document.title = query ? `${query} — Folio` : "Folio by Zip1 — Web, Wikipedia & Grokipedia Search";
   }, [query]);
+
+  useEffect(() => {
+    if (!onResults) {
+      setChrome("full");
+      return;
+    }
+    let last = window.scrollY;
+    const onScroll = () => {
+      const y = window.scrollY;
+      const delta = y - last;
+      if (y < 40) setChrome("full");
+      else if (delta > 6) setChrome("hidden");
+      else if (delta < -6) setChrome("search");
+      last = y;
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, [onResults]);
 
   useEffect(() => {
     if (!query) return;
@@ -467,29 +505,44 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
         {loading ? <div className="folio-bar h-full w-1/3 bg-accent" /> : null}
       </div>
       {onResults ? (
-        <header className="sticky top-0 z-20 border-b border-line bg-bg">
-          <div className="mx-auto flex max-w-6xl flex-col gap-4 px-4 py-4 sm:px-6">
+        <header
+          className={`fixed inset-x-0 top-0 z-20 border-b border-line bg-bg transition-transform duration-200 ease-out ${
+            chrome === "hidden" && !open ? "-translate-y-full" : "translate-y-0"
+          }`}
+        >
+          <div className="mx-auto flex max-w-6xl flex-col px-4 py-3 sm:px-6">
             <button
               type="button"
               onClick={goHome}
-              className="w-fit font-display text-2xl tracking-tight text-ink transition-transform duration-150 ease-out active:scale-[0.96]"
+              className={`w-fit font-display text-2xl tracking-tight text-ink transition-transform duration-150 ease-out active:scale-[0.96] ${
+                chrome === "search" && !open ? "hidden" : ""
+              }`}
             >
               Folio
             </button>
-            {searchForm}
-            {sourcePills}
+            <div className={chrome === "search" && !open ? "" : "pt-4"}>{searchForm}</div>
+            <div className={chrome === "search" && !open ? "hidden" : "pt-4"}>{sourcePills}</div>
           </div>
         </header>
       ) : (
+        <>
         <header className="flex min-h-screen flex-col items-center bg-bg px-4 pt-[18vh]">
+          <h1 className="mb-6 max-w-xl text-center font-display text-4xl leading-tight tracking-tight text-ink sm:text-5xl">
+            Folio by Zip1 — Web, Wikipedia & Grokipedia Search
+          </h1>
+          <div className="w-full max-w-xl">{searchForm}</div>
+          <p className="mt-4 max-w-xl text-center text-sm leading-relaxed text-muted">
+            Search the web with Folio by Zip1. Explore web results and optional Wikipedia and Grokipedia sources from
+            one simple search interface.
+          </p>
+          {adsOn ? <NetworkAd /> : null}
           <button
             type="button"
-            onClick={goHome}
-            className="mb-8 font-display text-5xl tracking-tight text-ink transition-transform duration-150 ease-out active:scale-[0.96]"
+            onClick={() => setAdsOpen(true)}
+            className="mt-8 min-h-11 text-sm text-muted"
           >
-            Folio
+            Ad preferences
           </button>
-          <div className="w-full max-w-xl">{searchForm}</div>
           {!anySource ? (
             <div className="mt-4 w-full max-w-xl">
               <p className="mb-2 text-sm text-accent">Turn on Web, Wikipedia, or Grokipedia to search.</p>
@@ -497,9 +550,19 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
             </div>
           ) : null}
         </header>
+        <section aria-labelledby="how-folio" className="mx-auto max-w-xl px-4 pb-16">
+          <h2 id="how-folio" className="font-display text-2xl text-ink">
+            How Folio works
+          </h2>
+          <p className="mt-3 text-sm leading-relaxed text-muted">
+            Submit a query in the search bar. Web results are included. Wikipedia and Grokipedia are optional sources
+            you can turn on or off.
+          </p>
+        </section>
+        </>
       )}
       {onResults ? (
-        <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-10">
+        <main className="mx-auto max-w-6xl px-4 pt-52 pb-8 sm:px-6 sm:pb-10">
           <Results
             query={query}
             data={data}
@@ -511,9 +574,105 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
               grok: search.grokPage ?? 1,
             }}
             onPage={onPage}
+            onDive={(value) => go(value)}
           />
         </main>
       ) : null}
+      <SiteFooter />
+      <AdPreferences
+        open={adsOpen}
+        adsOn={adsOn}
+        onClose={() => setAdsOpen(false)}
+        onChange={(next) => {
+          setAdsOn(next);
+          localStorage.setItem(STORAGE_ADS, next ? "1" : "0");
+        }}
+      />
+    </div>
+  );
+}
+
+function NetworkAd() {
+  const [ad, setAd] = useState<NetworkAd | null | undefined>(undefined);
+
+  useEffect(() => {
+    let cancelled = false;
+    requestNetworkAd({ data: {} })
+      .then((row) => {
+        if (!cancelled) setAd(row);
+      })
+      .catch(() => {
+        if (!cancelled) setAd(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (ad === undefined) return <p className="mt-6 text-sm text-muted">Asking the ad network…</p>;
+  if (!ad) return <p className="mt-6 text-sm text-muted">The ad network didn’t return an ad.</p>;
+
+  return (
+    <aside className="mt-6 w-full max-w-xl" aria-label="Paid advertisement">
+      <a href={ad.clickUrl} className="block rounded-2xl border border-line bg-surface px-4 py-3 text-left">
+        <span className="flex items-center gap-2 text-xs tracking-widest text-muted uppercase">
+          <span className="rounded-full bg-accent-soft px-2 py-0.5 font-medium text-accent">Ad</span>
+          <span>{ad.network}</span>
+        </span>
+        {ad.imageUrl ? (
+          <img src={ad.imageUrl} alt="" className="mt-3 max-h-52 w-full rounded-xl object-contain" />
+        ) : null}
+        {ad.text ? <span className="mt-2 block text-sm leading-relaxed text-ink">{ad.text}</span> : null}
+      </a>
+    </aside>
+  );
+}
+
+function AdPreferences({
+  open,
+  adsOn,
+  onClose,
+  onChange,
+}: {
+  open: boolean;
+  adsOn: boolean;
+  onClose: () => void;
+  onChange: (next: boolean) => void;
+}) {
+  const titleId = useId();
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50">
+      <button type="button" aria-label="Close ad preferences" onClick={onClose} className="absolute inset-0 bg-ink/35" />
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        className="absolute top-1/2 left-1/2 w-[min(24rem,calc(100%-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-3xl border border-line bg-surface p-5"
+      >
+        <h2 id={titleId} className="font-display text-2xl">
+          Ad preferences
+        </h2>
+        <p className="mt-2 text-sm leading-relaxed text-muted">
+          Sponsored listings stay off unless you turn them on. Folio asks Kevel for one ad and does not send your search.
+        </p>
+        <label className="mt-4 flex min-h-11 items-start gap-3 text-sm text-ink">
+          <input
+            type="checkbox"
+            className="mt-1 size-4 accent-accent"
+            checked={adsOn}
+            onChange={(event) => onChange(event.target.checked)}
+          />
+          <span>Call the ad network for a sponsored listing</span>
+        </label>
+        <button
+          type="button"
+          onClick={onClose}
+          className="mt-5 inline-flex min-h-11 w-full items-center justify-center rounded-full bg-ink px-4 text-sm font-medium text-bg"
+        >
+          Done
+        </button>
+      </div>
     </div>
   );
 }
@@ -544,6 +703,26 @@ function siteHost(url: string): string {
     return new URL(url).hostname.replace(/^www\./, "");
   } catch {
     return "";
+  }
+}
+
+function youtubeId(url: string): string | null {
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.replace(/^www\./, "");
+    const idFrom = (value: string | null | undefined) =>
+      value && /^[A-Za-z0-9_-]{11}$/.test(value) ? value : null;
+    if (host === "youtu.be") return idFrom(parsed.pathname.split("/").filter(Boolean)[0]);
+    if (host !== "youtube.com" && host !== "m.youtube.com" && host !== "music.youtube.com") return null;
+    const watch = idFrom(parsed.searchParams.get("v"));
+    if (parsed.pathname === "/watch") return watch;
+    const parts = parsed.pathname.split("/").filter(Boolean);
+    if (parts[0] === "embed" || parts[0] === "shorts" || parts[0] === "live" || parts[0] === "v") {
+      return idFrom(parts[1]);
+    }
+    return null;
+  } catch {
+    return null;
   }
 }
 
@@ -663,6 +842,52 @@ function References({ hits }: { hits: SearchHit[] }) {
   );
 }
 
+function DeepDive({
+  topic,
+  items,
+  onPick,
+}: {
+  topic: string;
+  items: string[];
+  onPick: (query: string) => void;
+}) {
+  if (!items.length) return null;
+  const needle = topic.trim().toLowerCase();
+  return (
+    <div>
+      <h3 className="font-display text-xl text-ink">Deep dive into {topic}</h3>
+      <ul className="mt-3 grid gap-2 sm:grid-cols-2">
+        {items.map((item) => {
+          const at = needle && item.toLowerCase().startsWith(needle) ? needle.length : -1;
+          const shared = at > 0 ? item.slice(0, at) : "";
+          const rest = at > 0 ? item.slice(at) : item;
+          return (
+            <li key={item}>
+              <button
+                type="button"
+                onClick={() => onPick(item)}
+                className="flex min-h-11 w-full items-center gap-2 rounded-full border border-line bg-surface px-3 text-left text-sm text-ink"
+              >
+                <Search className="size-4 shrink-0 text-muted" aria-hidden="true" />
+                <span className="min-w-0 truncate">
+                  {shared ? (
+                    <>
+                      <span>{shared}</span>
+                      <span className="font-semibold">{rest}</span>
+                    </>
+                  ) : (
+                    item
+                  )}
+                </span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
 function Results({
   query,
   data,
@@ -670,6 +895,7 @@ function Results({
   sources,
   pages,
   onPage,
+  onDive,
 }: {
   query: string;
   data: SearchPayload | null;
@@ -677,6 +903,7 @@ function Results({
   sources: Sources;
   pages: Record<SourceId, number>;
   onPage: (source: SourceId, page: number) => void;
+  onDive: (query: string) => void;
 }) {
   const blocks: SourceId[] = (["web", "wiki", "grok"] as const).filter((key) => sources[key] && data);
   const visible = blocks.map((key) => ({
@@ -729,7 +956,7 @@ function Results({
               block.page,
               block.hits.length,
               block.done,
-              block.key === "grok" ? GROK_PAGE : PAGE,
+              block.key === "grok" ? GROK_PAGE : block.key === "web" ? WEB_PAGE : PAGE,
             );
             return (
               <section key={block.key} aria-labelledby={`source-${block.key}`} className="grid gap-3">
@@ -751,39 +978,46 @@ function Results({
                   </p>
                 ) : null}
                 <ul className="grid">
-                  {block.hits.map((hit) => (
-                    <li key={hit.id} className={`border-b border-line ${hit.id === openId ? "bg-accent-soft" : ""}`}>
-                      <div className="flex items-start gap-1">
-                        <button
-                          type="button"
-                          onClick={() => setOpenId(hit.id)}
-                          aria-pressed={hit.id === openId}
-                          className="group min-w-0 flex-1 px-1 py-4 text-left"
-                        >
-                          <p className="flex items-center gap-2 text-xs tracking-wide text-muted uppercase">
-                            <SiteLogo url={hit.url} />
-                            <span className="min-w-0 truncate">{hit.meta}</span>
-                          </p>
-                          <p className="mt-1 font-display text-xl leading-snug text-ink group-hover:text-accent">
-                            <Highlight text={hit.title} query={query} />
-                          </p>
-                          {hit.snippet ? (
-                            <p className="mt-1 line-clamp-3 text-sm leading-relaxed text-muted">
-                              <Highlight text={hit.snippet} query={query} />
+                  {block.hits.map((hit, index) => (
+                    <Fragment key={hit.id}>
+                      <li className={`border-b border-line ${hit.id === openId ? "bg-accent-soft" : ""}`}>
+                        <div className="flex items-start gap-1">
+                          <button
+                            type="button"
+                            onClick={() => setOpenId(hit.id)}
+                            aria-pressed={hit.id === openId}
+                            className="group min-w-0 flex-1 px-1 py-4 text-left"
+                          >
+                            <p className="flex items-center gap-2 text-xs tracking-wide text-muted uppercase">
+                              <SiteLogo url={hit.url} />
+                              <span className="min-w-0 truncate">{hit.meta}</span>
                             </p>
-                          ) : null}
-                        </button>
-                        <a
-                          href={hit.url}
-                          target="_blank"
-                          rel="noreferrer"
-                          aria-label={`Open ${hit.title} in a new tab`}
-                          className="mt-3 grid size-11 shrink-0 place-items-center rounded-full text-muted hover:text-accent"
-                        >
-                          <ArrowUpRight className="size-4" aria-hidden="true" />
-                        </a>
-                      </div>
-                    </li>
+                            <p className="mt-1 font-display text-xl leading-snug text-ink group-hover:text-accent">
+                              <Highlight text={hit.title} query={query} />
+                            </p>
+                            {hit.snippet ? (
+                              <p className="mt-1 line-clamp-2 text-sm leading-relaxed text-muted">
+                                <Highlight text={hit.snippet} query={query} />
+                              </p>
+                            ) : null}
+                          </button>
+                          <a
+                            href={hit.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            aria-label={`Open ${hit.title} in a new tab`}
+                            className="mt-3 grid size-11 shrink-0 place-items-center rounded-full text-muted hover:text-accent"
+                          >
+                            <ArrowUpRight className="size-4" aria-hidden="true" />
+                          </a>
+                        </div>
+                      </li>
+                      {block.key === "web" && index === 0 && block.page === 1 && data.deepDive.length > 0 ? (
+                        <li className="border-b border-line py-4">
+                          <DeepDive topic={query} items={data.deepDive} onPick={onDive} />
+                        </li>
+                      ) : null}
+                    </Fragment>
                   ))}
                 </ul>
                 <Pager
@@ -890,6 +1124,7 @@ function ResultPeek({
   const extract = preview?.extract || hit.snippet;
   const paragraphs = extract.split(/\n\n+/).map((part) => part.trim()).filter(Boolean);
   const pageUrl = preview?.url || hit.url;
+  const videoId = youtubeId(pageUrl);
 
   return (
     <div className="fixed inset-0 z-40">
@@ -942,7 +1177,19 @@ function ResultPeek({
           </div>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-6">
-          {preview?.image ? (
+          {videoId ? (
+            <div className="mb-4 aspect-video overflow-hidden rounded-xl bg-ink">
+              <iframe
+                key={videoId}
+                src={`https://www.youtube-nocookie.com/embed/${videoId}`}
+                title={preview?.title || hit.title}
+                className="h-full w-full"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                allowFullScreen
+                referrerPolicy="strict-origin-when-cross-origin"
+              />
+            </div>
+          ) : preview?.image ? (
             <img src={preview.image} alt="" className="mb-4 max-h-52 w-full rounded-xl object-cover" />
           ) : null}
           <h2 id={titleId} className="font-display text-3xl leading-tight">

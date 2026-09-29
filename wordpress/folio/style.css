@@ -3,7 +3,7 @@ Theme Name: Folio
 Theme URI: https://zip1.ai
 Author: Folio
 Description: Search the web, Wikipedia, and Grokipedia. Definitions, references, and trending topics sit beside the results.
-Version: 1.0.0
+Version: 1.2.0
 Requires at least: 6.0
 Tested up to: 6.7
 Requires PHP: 7.4
@@ -12,6 +12,21 @@ License URI: https://www.gnu.org/licenses/gpl-2.0.html
 Text Domain: folio
 */
 
+/*
+  Custom themes override these variables on html[data-theme="name"].
+  --bg            page background
+  --surface       cards and the search field
+  --ink           main text
+  --muted         secondary text
+  --line          borders
+  --accent        links, chips, focus
+  --accent-soft   selected rows and highlights
+  --shadow        menus and overlays
+  --radius        cards and menus
+  --search-radius search field, chips, and buttons
+  --sans          body font
+  --display       headings
+*/
 :root {
   --bg: #f3efe6;
   --surface: #fffdf8;
@@ -20,8 +35,33 @@ Text Domain: folio
   --line: #e4dcd0;
   --accent: #0e6b52;
   --accent-soft: #e4f2ec;
+  --shadow: 0 16px 40px rgba(28, 25, 20, 0.08);
+  --radius: 1.4rem;
+  --search-radius: 999px;
   --sans: "Outfit", ui-sans-serif, system-ui, sans-serif;
   --display: "Fraunces", Georgia, "Times New Roman", serif;
+}
+
+html[data-theme="night"] {
+  --bg: #16130f;
+  --surface: #221e18;
+  --ink: #f4efe6;
+  --muted: #b7ad9e;
+  --line: #3a332b;
+  --accent: #7dcea8;
+  --accent-soft: #1c3329;
+  --shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
+}
+
+html[data-theme="paper"] {
+  --bg: #f7f7f4;
+  --surface: #ffffff;
+  --ink: #111111;
+  --muted: #5c5c5c;
+  --line: #e2e2e2;
+  --accent: #1d4e89;
+  --accent-soft: #e7eef6;
+  --shadow: 0 12px 32px rgba(17, 17, 17, 0.06);
 }
 
 * { box-sizing: border-box; }
@@ -35,9 +75,13 @@ body {
 }
 button, input { font: inherit; color: inherit; }
 button { cursor: pointer; }
+button:disabled { cursor: default; opacity: 0.45; }
 a { color: inherit; }
 img { max-width: 100%; }
-::selection { background: var(--accent-soft); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+::selection { background: var(--accent-soft); color: var(--ink); }
+h1, h2, h3 { text-wrap: balance; }
+p { text-wrap: pretty; }
 
 .folio-wrap { width: min(1100px, calc(100% - 2rem)); margin: 0 auto; }
 .folio-home {
@@ -62,9 +106,11 @@ img { max-width: 100%; }
   min-height: 3.5rem;
   padding: 0.35rem 0.35rem 0.35rem 1rem;
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: var(--search-radius);
   background: var(--surface);
+  transition: border-color 160ms ease;
 }
+.folio-bar:focus-within { border-color: var(--accent); }
 .folio-bar input {
   flex: 1;
   min-width: 0;
@@ -91,9 +137,9 @@ img { max-width: 100%; }
   right: 0;
   overflow: hidden;
   border: 1px solid var(--line);
-  border-radius: 1.25rem;
+  border-radius: var(--radius);
   background: var(--surface);
-  box-shadow: 0 16px 40px rgba(28, 25, 20, 0.08);
+  box-shadow: var(--shadow);
 }
 .folio-menu p.label, .folio-label {
   margin: 0;
@@ -127,10 +173,12 @@ img { max-width: 100%; }
   min-height: 2.5rem;
   padding: 0 0.9rem;
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: var(--search-radius);
   background: transparent;
   color: var(--muted);
+  transition: background 160ms ease, color 160ms ease, border-color 160ms ease;
 }
+.chip:hover { border-color: var(--accent); color: var(--ink); }
 .chip.is-on { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
 
 .folio-top {
@@ -159,7 +207,7 @@ img { max-width: 100%; }
 .side { display: grid; gap: 1rem; }
 .card {
   border: 1px solid var(--line);
-  border-radius: 1.4rem;
+  border-radius: var(--radius);
   background: var(--surface);
   padding: 1rem;
 }
@@ -176,7 +224,7 @@ img { max-width: 100%; }
   min-height: 2.75rem;
   margin-top: 0.4rem;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--search-radius);
   background: var(--bg);
 }
 .source { margin-bottom: 2.4rem; }
@@ -191,6 +239,7 @@ img { max-width: 100%; }
   text-align: left;
 }
 .hit h3 { margin: 0.25rem 0 0; font-family: var(--display); font-size: 1.3rem; font-weight: 520; }
+.hit button.body:hover h3 { color: var(--accent); }
 .hit.is-on { background: var(--accent-soft); }
 .meta { display: flex; align-items: center; gap: 0.45rem; font-size: 0.75rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
 .snippet { margin: 0.3rem 0 0; color: var(--muted); font-size: 0.92rem; line-height: 1.45; }
@@ -199,7 +248,7 @@ img { max-width: 100%; }
   min-width: 2.5rem;
   min-height: 2.5rem;
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: var(--search-radius);
   background: transparent;
 }
 .pager button.is-on { background: var(--ink); color: var(--bg); border-color: var(--ink); }
@@ -215,20 +264,42 @@ img { max-width: 100%; }
   flex-direction: column;
   background: var(--surface);
   border-left: 1px solid var(--line);
+  animation: folio-peek-side 180ms ease-out;
 }
+@keyframes folio-peek-side { from { transform: translateX(1.5rem); } }
+.peek header { display: flex; align-items: center; justify-content: space-between; }
 .peek header, .peek footer { padding: 1rem; }
 .peek .body { overflow: auto; padding: 0 1.25rem 1.5rem; }
+.peek .body h2 { margin: 0; font-family: var(--display); font-weight: 520; }
 .peek footer a {
   display: flex;
   align-items: center;
   justify-content: center;
   min-height: 2.75rem;
-  border-radius: 999px;
+  border-radius: var(--search-radius);
   background: var(--ink);
   color: var(--bg);
   text-decoration: none;
 }
 @media (max-width: 639px) {
-  .peek { top: auto; height: min(88vh, 100%); border-left: 0; border-top: 1px solid var(--line); border-radius: 1.4rem 1.4rem 0 0; }
+  .peek {
+    top: auto;
+    height: min(88vh, 100%);
+    border-left: 0;
+    border-top: 1px solid var(--line);
+    border-radius: var(--radius) var(--radius) 0 0;
+    animation-name: folio-peek-up;
+  }
+}
+@keyframes folio-peek-up { from { transform: translateY(1.25rem); } }
+body.admin-bar .folio-top { top: 32px; }
+body.admin-bar .peek { top: 32px; }
+@media (max-width: 782px) {
+  body.admin-bar .folio-top,
+  body.admin-bar .peek { top: 46px; }
+  body.admin-bar .peek { top: auto; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .peek { animation: none; }
 }
 .status { color: var(--muted); }

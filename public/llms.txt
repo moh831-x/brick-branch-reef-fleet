@@ -1,0 +1,12 @@
+# Folio by Zip1
+
+Folio is the web search page at https://www.zip1.ai/. A query can include web results, and Wikipedia and Grokipedia when those sources are switched on.
+
+- [Search](https://www.zip1.ai/): the search box
+- [About](https://www.zip1.ai/about): what Folio by Zip1 is
+- [How to search](https://www.zip1.ai/how-to-search): the search box, source switches, results, and page controls
+
+Addresses that contain a search query are the same search page, not separate articles.
+
+Bot search is `GET https://www.zip1.ai/api/search`. `q` is required and limited to 180 characters. `web`, `wiki`, and `grok` are `1` or `0` and default to `1`. `webPage`, `wikiPage`, and `grokPage` start at 1. Web returns up to 10 results, Wikipedia 8, and Grokipedia 12. The search does not run when `web`, `wiki`, and `grok` are all `0`.
+

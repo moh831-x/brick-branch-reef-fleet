@@ -1,4 +1,4 @@
-import { GROK_PAGE, PAGE } from "./search.shared";
+import { GROK_PAGE, PAGE, WEB_PAGE } from "./search.shared";
 
 export type SourceId = "web" | "wiki" | "grok";
 
@@ -51,6 +51,7 @@ export type SearchPayload = {
   placesError?: string;
   near: string;
   definitions: WordDefinition[];
+  deepDive: string[];
 };
 
 export type SearchInput = {
@@ -90,6 +91,13 @@ export type Suggestion = {
   source: "wiki" | "grok";
 };
 
+export type NetworkAd = {
+  network: "Kevel";
+  text: string;
+  clickUrl: string;
+  imageUrl?: string;
+};
+
 export type Trend = {
   title: string;
   snippet: string;
@@ -115,6 +123,7 @@ export function emptyPayload(query: string): SearchPayload {
     places: [],
     near: "",
     definitions: [],
+    deepDive: [],
   };
 }
 
@@ -280,8 +289,8 @@ function readBingTotal(html: string): number | undefined {
 async function searchWeb(query: string, offset: number, near: string): Promise<SourceBlock> {
   const first = Math.max(1, offset + 1);
   const q = near ? `${query} ${near}` : query;
-  const rssUrl = `https://www.bing.com/search?q=${encodeURIComponent(q)}&format=rss&first=${first}`;
-  const htmlUrl = `https://www.bing.com/search?q=${encodeURIComponent(q)}&count=${PAGE}`;
+  const rssUrl = `https://www.bing.com/search?q=${encodeURIComponent(q)}&format=rss&first=${first}&count=${WEB_PAGE}`;
+  const htmlUrl = `https://www.bing.com/search?q=${encodeURIComponent(q)}&count=${WEB_PAGE}`;
   const [xml, html] = await Promise.all([
     getText(rssUrl, "application/rss+xml, application/xml, text/xml"),
     getText(htmlUrl, "text/html").catch(() => ""),
@@ -295,7 +304,7 @@ async function searchWeb(query: string, offset: number, near: string): Promise<S
     if (!title || !link) continue;
     const host = hostOf(link);
     if (!host || host.endsWith("bing.com")) continue;
-    const snippet = clip(decodeEntities(tag(block, "description")));
+    const snippet = clip(decodeEntities(tag(block, "description")), 160);
     const when = formatDay(decodeEntities(tag(block, "pubDate")));
     results.push({
       id: `web:${link}`,
@@ -305,9 +314,9 @@ async function searchWeb(query: string, offset: number, near: string): Promise<S
       snippet,
       meta: [host, when].filter(Boolean).join(" · "),
     });
-    if (results.length >= PAGE) break;
+    if (results.length >= WEB_PAGE) break;
   }
-  return { results, total: readBingTotal(html), done: results.length < PAGE };
+  return { results, total: readBingTotal(html), done: results.length < WEB_PAGE };
 }
 
 type WikiSearchResponse = {
@@ -671,20 +680,54 @@ async function defineQuery(query: string): Promise<WordDefinition[]> {
   return found.filter((item): item is WordDefinition => item !== null).slice(0, 2);
 }
 
+async function readDeepDive(query: string): Promise<string[]> {
+  const url = `https://api.bing.com/osjson.aspx?query=${encodeURIComponent(query)}`;
+  const data = await getJson<[string, string[]]>(url);
+  const rows = Array.isArray(data?.[1]) ? data[1] : [];
+  const base = query.trim().toLowerCase();
+  const seen = new Set<string>();
+  const items: string[] = [];
+  for (const row of rows) {
+    if (typeof row !== "string") continue;
+    const text = labelDive(row.trim().replace(/\s+/g, " ").slice(0, 80));
+    const key = text.toLowerCase();
+    if (!text || key === base || seen.has(key)) continue;
+    seen.add(key);
+    items.push(text);
+    if (items.length >= 8) break;
+  }
+  return items;
+}
+
+function labelDive(value: string): string {
+  const upper = new Set(["tv", "nfl", "nba", "mlb", "ufc", "pga", "lpga", "us", "usa", "uk"]);
+  const small = new Set(["a", "an", "and", "of", "the", "for", "to", "in", "on", "vs"]);
+  return value
+    .split(" ")
+    .map((word, index) => {
+      const lower = word.toLowerCase();
+      if (upper.has(lower)) return lower.toUpperCase();
+      if (index > 0 && small.has(lower)) return lower;
+      return lower.replace(/^([a-z])/, (letter) => letter.toUpperCase());
+    })
+    .join(" ");
+}
+
 export async function runSearch(input: SearchInput): Promise<SearchPayload> {
   const started = Date.now();
-  const query = input.q.trim();
+  const query = input.q.replace(/\s+/g, " ").trim();
   if (!input.web && !input.wiki && !input.grok) {
     return { ...emptyPayload(query), tookMs: 0 };
   }
 
-  const [web, wikiOutcome, grok, definitions] = await Promise.all([
+  const [web, wikiOutcome, grok, definitions, deepDive] = await Promise.all([
     input.web ? searchWeb(query, input.webOffset, input.near).catch(failed) : Promise.resolve(emptyBlock()),
     input.wiki
       ? searchWiki(query, input.wikiOffset).catch((error) => ({ block: failed(error), places: [] as PlaceRef[] }))
       : Promise.resolve({ block: emptyBlock(), places: [] as PlaceRef[] }),
     input.grok ? searchGrok(query, input.grokOffset).catch(failed) : Promise.resolve(emptyBlock()),
-    defineQuery(query),
+    defineQuery(input.card ? query : ""),
+    input.web && input.webOffset === 0 ? readDeepDive(query).catch(() => []) : Promise.resolve([]),
   ]);
   const wiki = wikiOutcome.block;
 
@@ -734,6 +777,7 @@ export async function runSearch(input: SearchInput): Promise<SearchPayload> {
     placesError,
     near: input.near,
     definitions,
+    deepDive,
   };
 }
 
@@ -818,6 +862,52 @@ function tidyTrend(title: string, snippet: string): string {
     if (rest) text = /^[,.;:]/.test(rest) ? `${lead}${rest}` : `${lead} ${rest}`;
   }
   return clip(text, 160);
+}
+
+function allowedAdUrl(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:") return null;
+    const host = url.hostname.toLowerCase();
+    const allowed = host === "adzerk.net" || host === "kevel.com" || host === "zkcdn.net" || host.endsWith(".adzerk.net") || host.endsWith(".kevel.com") || host.endsWith(".zkcdn.net");
+    return allowed ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function runNetworkAd(): Promise<NetworkAd | null> {
+  const response = await fetch("https://e-23.adzerk.net/api/v2", {
+    method: "POST",
+    headers: { Accept: "application/json", "Content-Type": "application/json" },
+    body: JSON.stringify({
+      placements: [{ divName: "folio", networkId: 23, siteId: 667480, adTypes: [5] }],
+    }),
+    signal: AbortSignal.timeout(8000),
+  });
+  if (!response.ok) return null;
+  const data = (await response.json()) as {
+    decisions?: {
+      folio?: {
+        clickUrl?: string;
+        impressionUrl?: string;
+        contents?: Array<{ body?: string; data?: { title?: string; imageUrl?: string } }>;
+      };
+    };
+  };
+  const decision = data.decisions?.folio;
+  const content = decision?.contents?.[0];
+  const clickUrl = allowedAdUrl(decision?.clickUrl);
+  const imageUrl = allowedAdUrl(content?.data?.imageUrl) ?? undefined;
+  const rawText = content?.data?.title || (content?.body ?? "").replace(/<[^>]+>/g, " ");
+  const text = clip(decodeEntities(rawText), 180);
+  if (!decision || !clickUrl || (!text && !imageUrl)) return null;
+  const impression = allowedAdUrl(decision.impressionUrl);
+  if (impression) {
+    await fetch(impression, { signal: AbortSignal.timeout(4000) }).catch(() => undefined);
+  }
+  return { network: "Kevel", text, clickUrl, imageUrl };
 }
 
 let trendCache: { at: number; rows: Trend[] } | null = null;

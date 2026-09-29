@@ -1,7 +1,20 @@
 import { createFileRoute, stripSearchParams } from "@tanstack/react-router";
 import { FolioApp } from "@/components/folio-app";
 import { searchAll } from "@/lib/search.functions";
-import { GROK_PAGE, PAGE, pageOf } from "@/lib/search.shared";
+import { GROK_PAGE, PAGE, WEB_PAGE, pageOf } from "@/lib/search.shared";
+
+const HOME_TITLE = "Folio by Zip1 — Web, Wikipedia & Grokipedia Search";
+const HOME_DESCRIPTION =
+  "Search the web with Folio by Zip1. Explore web results and optional Wikipedia and Grokipedia sources from one simple search interface.";
+const HOME_URL = "https://www.zip1.ai/";
+
+const websiteJsonLd = {
+  "@context": "https://schema.org",
+  "@type": "WebSite",
+  name: "Folio by Zip1",
+  alternateName: "Folio",
+  url: HOME_URL,
+};
 
 export type FolioSearch = {
   q: string;
@@ -53,13 +66,32 @@ export const Route = createFileRoute("/")({
         web: deps.web !== false,
         wiki: deps.wiki !== false,
         grok: deps.grok !== false,
-        webOffset: (deps.webPage - 1) * PAGE,
+        webOffset: (deps.webPage - 1) * WEB_PAGE,
         wikiOffset: (deps.wikiPage - 1) * PAGE,
         grokOffset: (deps.grokPage - 1) * GROK_PAGE,
         card: true,
         near: deps.near.trim(),
       },
     });
+  },
+  head: ({ match }) => {
+    const q = match.search.q.trim();
+    if (q) {
+      return {
+        meta: [
+          { title: `${q} — Folio` },
+          { name: "robots", content: "noindex, follow" },
+        ],
+      };
+    }
+    return {
+      meta: [
+        { title: HOME_TITLE },
+        { name: "description", content: HOME_DESCRIPTION },
+      ],
+      links: [{ rel: "canonical", href: HOME_URL }],
+      scripts: [{ type: "application/ld+json", children: JSON.stringify(websiteJsonLd) }],
+    };
   },
   component: FolioRoute,
 });
