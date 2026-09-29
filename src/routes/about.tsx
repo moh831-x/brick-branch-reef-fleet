@@ -38,10 +38,11 @@ function AboutPage() {
           Grokipedia, or Bing.
         </p>
         <p>
-          Web, Wikipedia, and Grokipedia start switched on. Wikipedia and Grokipedia are marked optional. You can turn
-          any of the three off, and this browser remembers the choice. If every source is off, Folio does not run a
-          search. The search button stays disabled, and the home page asks you to turn Web, Wikipedia, or Grokipedia on
-          again.
+          Web, Wikipedia, and Grokipedia start switched on. Images starts off and adds a grid of pictures from Bing’s
+          public image results when you turn it on. Wikipedia, Grokipedia, and Images are marked optional. You can turn
+          any source on or off, and this browser remembers the choice. If every source is off, Folio does not run a
+          search. The search button stays disabled, and the home page asks you to turn Web, Wikipedia, Grokipedia, or
+          Images on again.
         </p>
         <p>
           When a search runs, each source that is on has its own list. If Wikipedia returns a first article, a short
