@@ -15,11 +15,6 @@ export const Route = createFileRoute("/privacy")({
   component: PrivacyPage,
 });
 
-/** Details the site owner still has to supply. Shown highlighted until replaced. */
-function Fill({ children }: { children: ReactNode }) {
-  return <mark className="rounded-sm px-1 font-medium">[{children}]</mark>;
-}
-
 function Out({ href, children }: { href: string; children: ReactNode }) {
   return (
     <a href={href} className="text-accent" rel="noreferrer">
@@ -42,13 +37,13 @@ function PrivacyPage() {
       </p>
       <h1 className="font-display text-4xl leading-tight tracking-tight text-ink">{TITLE}</h1>
       <p className="mt-2 text-sm text-muted">
-        Effective <Fill>EFFECTIVE DATE</Fill>
+        Effective September 29, 2026
       </p>
       <div className="mt-6 grid gap-4 text-sm leading-relaxed text-ink">
         <p>
           This page covers Folio by Zip1 at www.zip1.ai and the Folio app for iPhone, which shows
-          this same site. Folio is run by <Fill>LEGAL ENTITY NAME</Fill>. Questions go to{" "}
-          <Fill>CONTACT EMAIL</Fill>.
+          this same site. Folio is run by Folio by Zip1 (“we”). Questions go to{" "}
+          <Out href="mailto:hossain6944@gmail.com">hossain6944@gmail.com</Out>.
         </p>
 
         <h2 className="pt-2 font-display text-2xl">In short</h2>
@@ -136,9 +131,9 @@ function PrivacyPage() {
         </p>
         <p>
           Folio is hosted on Vercel. Like any web host, Vercel receives each request’s IP address,
-          browser details, time, and the address requested, which can include your search text. How
-          long Vercel keeps these request logs is <Fill>VERCEL LOG RETENTION PERIOD</Fill>. See the{" "}
-          <Out href="https://vercel.com/legal/privacy-notice">Vercel privacy notice</Out>.
+          browser details, time, and the address requested, which can include your search text. Request
+          logs are kept by our hosting provider Vercel according to Vercel’s own retention policy. See
+          the <Out href="https://vercel.com/legal/privacy-policy">Vercel privacy policy</Out>.
         </p>
 
         <h2 className="pt-2 font-display text-2xl">What your browser loads from other services</h2>
@@ -183,8 +178,9 @@ function PrivacyPage() {
           preferences, Folio’s server asks the Kevel ad network for one ad and reports that it was
           shown. That request has no search text and no information about you. If an ad appears, its
           image loads from Kevel’s servers in your browser, and clicking it goes through Kevel’s
-          click link, so Kevel sees your IP address and browser details at that point. How Kevel
-          uses that information: <Fill>AD PARTNER DATA USE</Fill>. Turn the setting off to stop ads.
+          click link, so Kevel sees your IP address and browser details at that point. When ads
+          are enabled, Kevel may receive your IP address and browser details under its own privacy
+          policy (see <Out href="https://www.kevel.com/">Kevel</Out>). Turn the setting off to stop ads.
         </p>
 
         <h2 className="pt-2 font-display text-2xl">Links you open</h2>
@@ -230,7 +226,8 @@ function PrivacyPage() {
         <h2 className="pt-2 font-display text-2xl">Changes</h2>
         <p>
           If Folio’s handling of data changes, this page and the effective date above will change
-          with it. Questions or requests: <Fill>CONTACT EMAIL</Fill>.
+          with it. Questions or requests:{" "}
+          <Out href="mailto:hossain6944@gmail.com">hossain6944@gmail.com</Out>.
         </p>
       </div>
       <p className="mt-8">
