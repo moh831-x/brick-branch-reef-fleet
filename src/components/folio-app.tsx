@@ -4,6 +4,7 @@ import { ArrowUp, ArrowUpRight, BookOpen, ChevronLeft, ChevronRight, Clock, Comp
 import type { FolioSearch } from "@/routes/index";
 import {
   answerWithAi,
+  listAiProviders,
   previewHit,
   requestNetworkAd,
   suggestQueries,
@@ -19,7 +20,17 @@ import {
   type WordDefinition,
 } from "@/lib/search.functions";
 import { GROK_PAGE, IMAGES_MAX_PAGE, IMAGES_PAGE, MAX_PAGE, PAGE, WEB_PAGE, pageItems } from "@/lib/search.shared";
-import { AI_MESSAGES, pickAiContext, type AiAnswer, type AiPart } from "@/lib/ai.shared";
+import {
+  AI_MESSAGES,
+  AI_PROVIDERS,
+  aiProviderLabel,
+  pickAiContext,
+  selectedAiProvider,
+  type AiAnswer,
+  type AiPart,
+  type AiProviderId,
+  type AiProviderStatus,
+} from "@/lib/ai.shared";
 import { SiteFooter } from "@/components/site-footer";
 import { shareNative, tap, useIsNativeApp } from "@/lib/native";
 
@@ -37,6 +48,7 @@ const DEFAULT_SOURCES: Sources = { web: true, wiki: true, grok: true, images: fa
 const STORAGE_SOURCES = "folio-sources";
 const STORAGE_RECENT = "folio-recent";
 const STORAGE_ADS = "folio-ads";
+const STORAGE_AI_MODEL = "folio-ai-model";
 
 const SOURCE_META: Record<
   PillId,
@@ -69,7 +81,8 @@ const SOURCE_META: Record<
   ai: {
     label: "AI",
     optional: true,
-    blurb: "A short answer written by Grok from the top results, with links to its sources. Off until you turn it on.",
+    blurb:
+      "A short answer written by Grok, ChatGPT, or Claude from the top results, with links to its sources. Off until you turn it on.",
     icon: Sparkles,
   },
 };
@@ -110,6 +123,16 @@ function readRecent(): string[] {
     return Array.isArray(parsed) ? parsed.filter((item) => typeof item === "string").slice(0, 6) : [];
   } catch {
     return [];
+  }
+}
+
+function readAiModel(): AiProviderId | undefined {
+  if (typeof window === "undefined") return undefined;
+  try {
+    const stored = localStorage.getItem(STORAGE_AI_MODEL);
+    return AI_PROVIDERS.find((provider) => provider.id === stored)?.id;
+  } catch {
+    return undefined;
   }
 }
 
@@ -161,6 +184,8 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
 
   const [draft, setDraft] = useState(query);
   const [sources, setSources] = useState<Sources>(() => sourcesFrom(search));
+  /** The reader's AI provider pick: the address wins, then this browser's saved choice. */
+  const [aiModel, setAiModel] = useState<AiProviderId | undefined>(search.ai_model);
   const [recent, setRecent] = useState<string[]>([]);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [trends, setTrends] = useState<Trend[]>([]);
@@ -173,6 +198,10 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
   useEffect(() => {
     setAdsOn(readAds());
   }, []);
+
+  useEffect(() => {
+    setAiModel(search.ai_model ?? readAiModel());
+  }, [search.ai_model]);
 
   useEffect(() => {
     setDraft(query);
@@ -288,6 +317,7 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
         grok: nextSources.grok,
         images: nextSources.images,
         ai: nextSources.ai,
+        ai_model: aiModel,
       },
     });
   }
@@ -307,7 +337,25 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
           grok: next.grok,
           images: next.images,
           ai: next.ai,
+          ai_model: aiModel,
         },
+      });
+    }
+  }
+
+  function chooseAiModel(id: AiProviderId) {
+    tap("select");
+    setAiModel(id);
+    try {
+      localStorage.setItem(STORAGE_AI_MODEL, id);
+    } catch {
+      /* ignore quota */
+    }
+    if (onResults) {
+      void navigate({
+        to: "/",
+        search: (prev) => ({ ...prev, q: query, near: search.near, ai_model: id }),
+        replace: true,
       });
     }
   }
@@ -359,6 +407,7 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
         grok: search.grok,
         images: search.images,
         ai: search.ai,
+        ai_model: search.ai_model,
         webPage: source === "web" ? next : search.webPage,
         wikiPage: source === "wiki" ? next : search.wikiPage,
         grokPage: source === "grok" ? next : search.grokPage,
@@ -607,7 +656,7 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
             Submit a query in the search bar. Web results are included. Wikipedia and Grokipedia are optional sources
             you can turn on or off. Images is optional too and adds a grid of pictures when you switch it on. AI is
             optional and off until you turn it on. It adds a short, AI-generated answer with links to the results it
-            used.
+            used, written by Grok, ChatGPT, or Claude.
           </p>
         </section>
         </>
@@ -627,6 +676,8 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
             }}
             onPage={onPage}
             onDive={(value) => go(value)}
+            aiModel={aiModel}
+            onAiModel={chooseAiModel}
           />
         </main>
       ) : null}
@@ -948,6 +999,8 @@ function Results({
   pages,
   onPage,
   onDive,
+  aiModel,
+  onAiModel,
 }: {
   query: string;
   data: SearchPayload | null;
@@ -956,6 +1009,8 @@ function Results({
   pages: Record<SourceId, number>;
   onPage: (source: SourceId, page: number) => void;
   onDive: (query: string) => void;
+  aiModel: AiProviderId | undefined;
+  onAiModel: (id: AiProviderId) => void;
 }) {
   const blocks: SourceId[] = (["web", "wiki", "grok", "images"] as const).filter((key) => sources[key] && data);
   const visible = blocks.map((key) => ({
@@ -975,7 +1030,9 @@ function Results({
     setOpenId(null);
   }, [query, data]);
 
-  const aiCard = sources.ai ? <AiAnswerCard query={query} data={data} loading={loading} sources={sources} /> : null;
+  const aiCard = sources.ai ? (
+    <AiAnswerCard query={query} data={data} loading={loading} sources={sources} aiModel={aiModel} onAiModel={onAiModel} />
+  ) : null;
 
   if (!data) {
     return (
@@ -1145,51 +1202,91 @@ function Results({
 
 type AiState = { key: string; answer: AiAnswer | null };
 
+/** One request per page load for which AI providers are set up on the server. */
+let providersRequest: Promise<AiProviderStatus[]> | null = null;
+function loadAiProviders(): Promise<AiProviderStatus[]> {
+  providersRequest ??= listAiProviders({ data: {} }).catch((error) => {
+    providersRequest = null;
+    throw error;
+  });
+  return providersRequest;
+}
+
 /**
  * The optional AI answer at the top of the results. It waits for the other sources, then asks the
- * server for a short answer built from the top Web, Wikipedia, and Grokipedia results already on the
- * page. The lists render first and never wait on it. Paging a list does not ask again.
+ * server for a short answer built from the top results of every source that is on (Web, Wikipedia,
+ * Grokipedia, and Images). The lists render first and never wait on it. Paging a list does not ask
+ * again; switching provider does.
  */
 function AiAnswerCard({
   query,
   data,
   loading,
   sources,
+  aiModel,
+  onAiModel,
 }: {
   query: string;
   data: SearchPayload | null;
   loading: boolean;
   sources: Sources;
+  aiModel: AiProviderId | undefined;
+  onAiModel: (id: AiProviderId) => void;
 }) {
-  const key = JSON.stringify([query.replace(/\s+/g, " "), sources.web, sources.wiki, sources.grok]);
+  const [providers, setProviders] = useState<AiProviderStatus[] | "failed" | null>(null);
   const [state, setState] = useState<AiState | null>(null);
   const [attempt, setAttempt] = useState(0);
   const asked = useRef<string | null>(null);
-  const ready = Boolean(data) && !loading && data?.query === query.replace(/\s+/g, " ");
+
+  useEffect(() => {
+    let cancelled = false;
+    loadAiProviders()
+      .then((rows) => {
+        if (!cancelled) setProviders(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setProviders("failed");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const available = Array.isArray(providers) ? providers.filter((row) => row.available).map((row) => row.id) : [];
+  // Nothing is asked until the list loads. If the list fails, the server still picks and falls back.
+  const selected = Array.isArray(providers) ? selectedAiProvider(aiModel, available) : aiModel;
+  const normalized = query.replace(/\s+/g, " ");
+  const key = JSON.stringify([normalized, sources.web, sources.wiki, sources.grok, sources.images, selected ?? ""]);
+  const ready = providers !== null && Boolean(data) && !loading && data?.query === normalized;
 
   useEffect(() => {
     if (!ready || !data) return;
     const ask = `${key}#${attempt}`;
     if (asked.current === ask) return;
     asked.current = ask;
+    if (Array.isArray(providers) && available.length === 0) {
+      setState({ key, answer: { status: "unconfigured", message: AI_MESSAGES.unconfigured } });
+      return;
+    }
     const context = pickAiContext({
       web: sources.web ? data.web : undefined,
       wiki: sources.wiki ? data.wiki : undefined,
       grok: sources.grok ? data.grok : undefined,
+      images: sources.images ? data.images : undefined,
     });
     if (!context.length) {
       setState({ key, answer: { status: "no-context", message: AI_MESSAGES.noContext } });
       return;
     }
     setState({ key, answer: null });
-    answerWithAi({ data: { q: data.query, context } })
+    answerWithAi({ data: { q: data.query, context, provider: selected } })
       .then((answer) => setState((current) => (current?.key === key ? { key, answer } : current)))
       .catch(() =>
         setState((current) =>
           current?.key === key ? { key, answer: { status: "error", message: AI_MESSAGES.error } } : current,
         ),
       );
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- ask once per query and source set, not per page
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- ask once per query, source set, and provider, not per page
   }, [key, ready, attempt]);
 
   const answer = state?.key === key ? state.answer : null;
@@ -1210,10 +1307,15 @@ function AiAnswerCard({
           AI-generated · can be wrong
         </p>
       </div>
+      <AiProviderPicker providers={providers} selected={selected} onPick={onAiModel} />
       <div aria-live="polite">
         {pending ? (
           <div className="mt-3">
-            <p className="text-sm text-muted">Writing a short answer from the top results…</p>
+            <p className="text-sm text-muted">
+              {selected
+                ? `Asking ${aiProviderLabel(selected)} for a short answer from the top results…`
+                : "Writing a short answer from the top results…"}
+            </p>
             <div className="mt-3 grid gap-2" aria-hidden="true">
               <div className="h-3.5 w-full animate-pulse rounded bg-line" />
               <div className="h-3.5 w-11/12 animate-pulse rounded bg-line" />
@@ -1241,6 +1343,7 @@ function AiAnswerCard({
                       <SiteLogo url={cite.url} />
                       <span className="min-w-0 truncate">{cite.title}</span>
                       <span className="hidden shrink-0 text-xs text-muted sm:inline">
+                        {cite.source === "images" ? "Image · " : ""}
                         {siteHost(cite.url) || SOURCE_META[cite.source].label}
                       </span>
                     </a>
@@ -1249,8 +1352,14 @@ function AiAnswerCard({
               </ol>
             ) : null}
             <p className="mt-3 text-xs leading-relaxed text-muted">
-              Written by AI ({answer.model}) from the results on this page. It can be wrong or leave things out, so
-              check the sources.
+              {answer.failed.length > 0 ? (
+                <>
+                  {answer.failed.map(aiProviderLabel).join(" and ")} didn’t answer, so {aiProviderLabel(answer.provider)}{" "}
+                  did.{" "}
+                </>
+              ) : null}
+              Written by <span className="font-medium text-ink">{aiProviderLabel(answer.provider)}</span> ({answer.model})
+              from the results on this page. It can be wrong or leave things out, so check the sources.
             </p>
           </>
         ) : (
@@ -1270,6 +1379,52 @@ function AiAnswerCard({
         )}
       </div>
     </section>
+  );
+}
+
+/** Grok / ChatGPT / Claude. Providers without a key on the server are disabled and say "not set up". */
+function AiProviderPicker({
+  providers,
+  selected,
+  onPick,
+}: {
+  providers: AiProviderStatus[] | "failed" | null;
+  selected: AiProviderId | undefined;
+  onPick: (id: AiProviderId) => void;
+}) {
+  const rows = Array.isArray(providers) ? providers : null;
+  return (
+    <div
+      role="radiogroup"
+      aria-label="AI provider"
+      className="mt-3 grid grid-cols-3 gap-1 rounded-2xl border border-line bg-bg p-1"
+    >
+      {AI_PROVIDERS.map((provider) => {
+        const row = rows?.find((item) => item.id === provider.id);
+        // While the list loads nothing can be picked. If it failed, every option stays usable and the server decides.
+        const available = rows ? Boolean(row?.available) : providers === "failed";
+        const checked = selected === provider.id;
+        return (
+          <button
+            key={provider.id}
+            type="button"
+            role="radio"
+            aria-checked={checked}
+            disabled={!available}
+            onClick={() => {
+              if (!checked) onPick(provider.id);
+            }}
+            title={row?.model ? `${provider.company} · ${row.model}` : provider.company}
+            className={`flex min-h-11 flex-col items-center justify-center rounded-xl border px-1 text-sm leading-tight transition-transform duration-150 ease-out active:scale-[0.96] disabled:active:scale-100 ${
+              checked ? "border-accent bg-surface font-medium text-ink" : "border-transparent text-muted"
+            } ${available ? "" : "opacity-60"}`}
+          >
+            <span>{provider.label}</span>
+            {rows && !available ? <span className="text-[0.7rem]">not set up</span> : null}
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
