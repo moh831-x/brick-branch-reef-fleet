@@ -60,9 +60,13 @@ function AboutPage() {
         </p>
         <p>
           A search address includes the query you typed. Those addresses are for searching, not articles of their own.
-          The written pages on this site are this one and{" "}
+          The written pages on this site are this one,{" "}
           <Link to="/how-to-search" className="text-accent">
             How to search
+          </Link>
+          , and the{" "}
+          <Link to="/privacy" className="text-accent">
+            Privacy policy
           </Link>
           .
         </p>
