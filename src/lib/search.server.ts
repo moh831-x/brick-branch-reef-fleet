@@ -1,6 +1,15 @@
-import { GROK_PAGE, PAGE, WEB_PAGE } from "./search.shared";
+import { GROK_PAGE, IMAGES_MAX_PAGE, IMAGES_PAGE, PAGE, WEB_PAGE } from "./search.shared";
 
-export type SourceId = "web" | "wiki" | "grok";
+export type SourceId = "web" | "wiki" | "grok" | "images";
+
+export type ImageRef = {
+  /** Bing-hosted thumbnail (always https). */
+  thumb: string;
+  /** Full-size image on the original site (https), or the thumbnail when that is not safe to load. */
+  full: string;
+  width?: number;
+  height?: number;
+};
 
 export type SearchHit = {
   id: string;
@@ -9,6 +18,7 @@ export type SearchHit = {
   url: string;
   snippet: string;
   meta: string;
+  image?: ImageRef;
 };
 
 export type LeadCard = {
@@ -46,6 +56,7 @@ export type SearchPayload = {
   web: SourceBlock;
   wiki: SourceBlock;
   grok: SourceBlock;
+  images: SourceBlock;
   card: LeadCard | null;
   places: PlaceRef[];
   placesError?: string;
@@ -59,9 +70,11 @@ export type SearchInput = {
   web: boolean;
   wiki: boolean;
   grok: boolean;
+  images: boolean;
   webOffset: number;
   wikiOffset: number;
   grokOffset: number;
+  imagesOffset: number;
   card: boolean;
   near: string;
 };
@@ -119,6 +132,7 @@ export function emptyPayload(query: string): SearchPayload {
     web: emptyBlock(),
     wiki: emptyBlock(),
     grok: emptyBlock(),
+    images: emptyBlock(),
     card: null,
     places: [],
     near: "",
@@ -438,6 +452,132 @@ async function searchGrok(query: string, offset: number): Promise<SourceBlock> {
   };
 }
 
+/* ---------- Images: Bing's public image results (same provider as Web) ---------- */
+
+/** Bing hands back up to this many images per request. */
+const BING_IMAGE_BATCH = 35;
+/** Safe search for images. Bing's default for the web feed is Moderate; images ask for it explicitly. */
+const IMAGE_SAFE_SEARCH = "moderate";
+const imagePoolCache = new Map<string, { at: number; hits: SearchHit[]; exhausted: boolean }>();
+
+function unescapeAttr(value: string): string {
+  return value
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&");
+}
+
+function bingThumb(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:") return null;
+    if (!url.hostname.endsWith(".bing.net") && !url.hostname.endsWith(".bing.com")) return null;
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+function dimension(value: string | undefined): number | undefined {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 && n < 100_000 ? Math.round(n) : undefined;
+}
+
+/** Parse the image tiles from Bing's public image results markup. */
+export function parseBingImages(html: string): SearchHit[] {
+  const hits: SearchHit[] = [];
+  const tiles = html.split(/\sm="(?=\{)/).slice(1);
+  for (const tile of tiles) {
+    const end = tile.indexOf('"');
+    if (end < 0) continue;
+    let meta: { purl?: unknown; murl?: unknown; turl?: unknown; t?: unknown; desc?: unknown };
+    try {
+      meta = JSON.parse(unescapeAttr(tile.slice(0, end))) as typeof meta;
+    } catch {
+      continue;
+    }
+    const page = typeof meta.purl === "string" ? safeHttp(meta.purl) : null;
+    const thumb = bingThumb(meta.turl);
+    if (!page || !thumb) continue;
+    const host = hostOf(page);
+    if (!host || host.endsWith("bing.com")) continue;
+    const media = typeof meta.murl === "string" ? safeHttp(meta.murl) : null;
+    const rawTitle = typeof meta.t === "string" ? meta.t : typeof meta.desc === "string" ? meta.desc : "";
+    const title = clip(decodeEntities(rawTitle.replace(/[\ue000-\ue001]/g, "")), 140) || host;
+    const rest = tile.slice(end, end + 4000);
+    const size = rest.match(/class="nowrap">\s*(\d+)\s*(?:&#215;|×|x)\s*(\d+)/i);
+    const width = dimension(rest.match(/expw=(\d+)/)?.[1] ?? size?.[1]);
+    const height = dimension(rest.match(/exph=(\d+)/)?.[1] ?? size?.[2]);
+    hits.push({
+      id: `images:${media ?? thumb}`,
+      source: "images",
+      title,
+      url: page,
+      snippet: "",
+      meta: [host, width && height ? `${width}×${height}` : ""].filter(Boolean).join(" · "),
+      image: {
+        thumb,
+        // Only load the original over https; otherwise stay on Bing's thumbnail (no mixed content).
+        full: media && media.startsWith("https:") ? media : thumb,
+        width,
+        height,
+      },
+    });
+  }
+  return hits;
+}
+
+async function imageBatch(query: string, first: number): Promise<SearchHit[]> {
+  const url =
+    `https://www.bing.com/images/async?q=${encodeURIComponent(query)}` +
+    `&first=${first}&count=${BING_IMAGE_BATCH}&adlt=${IMAGE_SAFE_SEARCH}`;
+  return parseBingImages(await getText(url, "text/html"));
+}
+
+async function searchImages(query: string, offset: number): Promise<SourceBlock> {
+  const cap = IMAGES_MAX_PAGE * IMAGES_PAGE;
+  if (offset >= cap) return { results: [], done: true };
+  const want = Math.min(cap, offset + IMAGES_PAGE + 1);
+  const key = query.toLowerCase();
+  const cached = imagePoolCache.get(key);
+  const fresh = cached && Date.now() - cached.at < 10 * 60 * 1000 ? cached : null;
+  const hits = fresh ? [...fresh.hits] : [];
+  let exhausted = fresh?.exhausted ?? false;
+  const seen = new Set(hits.map((hit) => hit.id));
+  let batch = Math.ceil(hits.length / BING_IMAGE_BATCH);
+  // Bing does not always honour `first`; stop as soon as a batch adds nothing new.
+  while (!exhausted && hits.length < want && batch <= Math.ceil(cap / BING_IMAGE_BATCH)) {
+    let rows: SearchHit[];
+    try {
+      rows = await imageBatch(query, batch * BING_IMAGE_BATCH + 1);
+    } catch (error) {
+      if (!hits.length) throw error;
+      break;
+    }
+    batch += 1;
+    let added = 0;
+    for (const row of rows) {
+      if (seen.has(row.id)) continue;
+      seen.add(row.id);
+      hits.push(row);
+      added += 1;
+    }
+    if (added === 0) exhausted = true;
+  }
+  imagePoolCache.set(key, { at: fresh?.at ?? Date.now(), hits, exhausted });
+  if (imagePoolCache.size > 40) {
+    const oldest = imagePoolCache.keys().next().value;
+    if (oldest) imagePoolCache.delete(oldest);
+  }
+  const results = hits.slice(offset, offset + IMAGES_PAGE);
+  const done =
+    results.length < IMAGES_PAGE || offset + IMAGES_PAGE >= cap || (exhausted && hits.length <= offset + IMAGES_PAGE);
+  return { results, done };
+}
+
 function failed(error: unknown): SourceBlock {
   const message = error instanceof Error ? error.message : "Unavailable";
   return { results: [], error: message, done: true };
@@ -716,16 +856,17 @@ function labelDive(value: string): string {
 export async function runSearch(input: SearchInput): Promise<SearchPayload> {
   const started = Date.now();
   const query = input.q.replace(/\s+/g, " ").trim();
-  if (!input.web && !input.wiki && !input.grok) {
+  if (!input.web && !input.wiki && !input.grok && !input.images) {
     return { ...emptyPayload(query), tookMs: 0 };
   }
 
-  const [web, wikiOutcome, grok, definitions, deepDive] = await Promise.all([
+  const [web, wikiOutcome, grok, images, definitions, deepDive] = await Promise.all([
     input.web ? searchWeb(query, input.webOffset, input.near).catch(failed) : Promise.resolve(emptyBlock()),
     input.wiki
       ? searchWiki(query, input.wikiOffset).catch((error) => ({ block: failed(error), places: [] as PlaceRef[] }))
       : Promise.resolve({ block: emptyBlock(), places: [] as PlaceRef[] }),
     input.grok ? searchGrok(query, input.grokOffset).catch(failed) : Promise.resolve(emptyBlock()),
+    input.images ? searchImages(query, input.imagesOffset).catch(failed) : Promise.resolve(emptyBlock()),
     defineQuery(input.card ? query : ""),
     input.web && input.webOffset === 0 ? readDeepDive(query).catch(() => []) : Promise.resolve([]),
   ]);
@@ -772,6 +913,7 @@ export async function runSearch(input: SearchInput): Promise<SearchPayload> {
     web,
     wiki,
     grok,
+    images,
     card,
     places,
     placesError,
@@ -1025,7 +1167,12 @@ function previewFallback(input: { source: SourceId; title: string; url: string; 
   return {
     source: input.source,
     title: input.title,
-    kicker: input.source === "wiki" ? "Wikipedia" : input.source === "grok" ? "Grokipedia" : hostOf(url) || "Web",
+    kicker:
+      input.source === "wiki"
+        ? "Wikipedia"
+        : input.source === "grok"
+          ? "Grokipedia"
+          : hostOf(url) || (input.source === "images" ? "Images" : "Web"),
     extract: clip(cleanSnippet(input.snippet), 420),
     url,
   };

@@ -1,7 +1,7 @@
 import { createFileRoute, stripSearchParams } from "@tanstack/react-router";
 import { FolioApp } from "@/components/folio-app";
 import { searchAll } from "@/lib/search.functions";
-import { GROK_PAGE, PAGE, WEB_PAGE, pageOf } from "@/lib/search.shared";
+import { GROK_PAGE, IMAGES_MAX_PAGE, IMAGES_PAGE, PAGE, WEB_PAGE, pageOf } from "@/lib/search.shared";
 
 const HOME_TITLE = "Folio by Zip1 — Web, Wikipedia & Grokipedia Search";
 const HOME_DESCRIPTION =
@@ -22,15 +22,23 @@ export type FolioSearch = {
   web?: boolean;
   wiki?: boolean;
   grok?: boolean;
+  /** Images is opt-in: absent means off. */
+  images?: boolean;
   webPage?: number;
   wikiPage?: number;
   grokPage?: number;
+  imagesPage?: number;
 };
 
 function flag(value: unknown): boolean | undefined {
   if (value === "0" || value === 0 || value === false || value === "false") return false;
   if (value === "1" || value === 1 || value === true || value === "true") return true;
   return undefined;
+}
+
+function imagesPageOf(value: unknown): number | undefined {
+  const page = pageOf(value);
+  return page === undefined ? undefined : Math.min(IMAGES_MAX_PAGE, page);
 }
 
 export const Route = createFileRoute("/")({
@@ -40,12 +48,23 @@ export const Route = createFileRoute("/")({
     web: flag(raw.web),
     wiki: flag(raw.wiki),
     grok: flag(raw.grok),
+    images: flag(raw.images),
     webPage: pageOf(raw.webPage),
     wikiPage: pageOf(raw.wikiPage),
     grokPage: pageOf(raw.grokPage),
+    imagesPage: imagesPageOf(raw.imagesPage),
   }),
   search: {
-    middlewares: [stripSearchParams({ q: "", near: "", webPage: undefined, wikiPage: undefined, grokPage: undefined })],
+    middlewares: [
+      stripSearchParams({
+        q: "",
+        near: "",
+        webPage: undefined,
+        wikiPage: undefined,
+        grokPage: undefined,
+        imagesPage: undefined,
+      }),
+    ],
   },
   loaderDeps: ({ search }) => ({
     q: search.q.trim(),
@@ -53,9 +72,11 @@ export const Route = createFileRoute("/")({
     web: search.web,
     wiki: search.wiki,
     grok: search.grok,
+    images: search.images,
     webPage: search.webPage ?? 1,
     wikiPage: search.wikiPage ?? 1,
     grokPage: search.grokPage ?? 1,
+    imagesPage: search.imagesPage ?? 1,
   }),
   loader: ({ deps }) => {
     const q = deps.q.trim();
@@ -66,9 +87,11 @@ export const Route = createFileRoute("/")({
         web: deps.web !== false,
         wiki: deps.wiki !== false,
         grok: deps.grok !== false,
+        images: deps.images === true,
         webOffset: (deps.webPage - 1) * WEB_PAGE,
         wikiOffset: (deps.wikiPage - 1) * PAGE,
         grokOffset: (deps.grokPage - 1) * GROK_PAGE,
+        imagesOffset: (deps.imagesPage - 1) * IMAGES_PAGE,
         card: true,
         near: deps.near.trim(),
       },

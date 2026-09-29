@@ -34,8 +34,8 @@ and behaves exactly as before.
 - **Haptics** (`@capacitor/haptics`): taps on search submit, source toggles
   (selection tick), opening a result preview, pagination, share and outbound links.
 - **In-app browser** (`@capacitor/browser`): every off-site link (result arrows that
-  open a new tab on the web, "Open page", references, Wikipedia cards, place and map
-  links, the ad) opens in an SFSafariViewController over the app instead of taking the
+  open a new tab on the web, "Open page", "View full-size image", references,
+  Wikipedia cards, place and map links, the ad) opens in an SFSafariViewController over the app instead of taking the
   web view away from Folio. Folio's own pages stay in the app.
 - **Status bar and launch screen** (`@capacitor/status-bar`, `@capacitor/splash-screen`):
   dark status-bar text on Folio's paper background; branded launch screen that fades
@@ -45,8 +45,10 @@ and behaves exactly as before.
   the network returns.
 - App icon and launch image generated from the site's Folio mark (`public/favicon.svg`).
 
-Deferred: saving image results to Photos (needs `NSPhotoLibraryAddUsageDescription`
-plus a plugin, and image search is still in PR #1). Push notifications, widgets and
+Deferred: a native "Save to Photos" button for Images results. There is no official
+Capacitor plugin for saving to Photos, so it needs a community plugin (or a few lines
+of Swift) plus an `NSPhotoLibraryAddUsageDescription` string in Info.plist. Today "View full-size image" opens in the in-app browser, where
+the user can long-press to save. Push notifications, widgets and
 Spotlight/Siri shortcuts are further options if Apple asks for more native value.
 
 ## Files
@@ -136,7 +138,7 @@ needed; the project uses Swift Package Manager.
     *XS Max*-class simulator, or let App Store Connect scale down the 6.9" set if it
     offers to.
   - No iPad screenshots needed (iPhone-only build).
-  - Suggested shots: home with Trending; results for a query with the Wikipedia card;
+  - Suggested shots: home with Trending; results for a query with the Wikipedia card; Images grid;
     preview sheet with Share; location references; definitions; offline screen.
 - [ ] **App icon**: taken from the build (1024 × 1024, opaque); nothing to upload.
 - [ ] **Age rating**: fill in the questionnaire honestly. Folio shows unfiltered public
@@ -150,7 +152,7 @@ needed; the project uses Swift Package Manager.
 
 ### Reviewer notes (draft)
 
-> Folio is a search app that brings together web results, Wikipedia and Grokipedia in one list.
+> Folio is a search app that brings together web results, images, Wikipedia and Grokipedia.
 > No account is needed. Try searching "Paris", tap a result to open the preview
 > sheet, use the Share button, or tap the arrow to open the page in the in-app browser.
 > The source toggles let you include or leave out Wikipedia and Grokipedia. With no
@@ -217,6 +219,7 @@ manifests).
 >
 > SEARCH YOUR WAY
 > • Web results for news, official sites and the rest of the public web
+> • Images: a photo grid with a preview and a link to the full-size image
 > • Turn Wikipedia and Grokipedia on or off, and Folio remembers your choice
 > • Suggestions as you type, trending topics, and your recent searches (kept on your device)
 >
@@ -258,8 +261,7 @@ search,web search,wikipedia,grokipedia,encyclopedia,browser,answers,reference,lo
 - **4.2 Minimum functionality / web wrappers**: apps that only show a website are often
   rejected. The native share sheet, haptics, in-app browser, offline screen and
   launch/status-bar styling are there to address this. If Apple still rejects under
-  4.2, the next native features to add are saving images to Photos (after image search
-  lands), a Share Extension ("Search with Folio" from selected text), home-screen quick
+  4.2, the next native features to add are saving images to Photos, a Share Extension ("Search with Folio" from selected text), home-screen quick
   actions, or a widget.
 - **Remote content updates**: because the app loads the live site, the web UI can
   change without a new build. That's allowed as long as the app's core purpose doesn't

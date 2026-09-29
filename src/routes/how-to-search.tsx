@@ -3,7 +3,7 @@ import { SiteFooter } from "@/components/site-footer";
 
 const TITLE = "How to search with Folio by Zip1";
 const DESCRIPTION =
-  "How to use Folio: enter a query, switch Web, Wikipedia, and Grokipedia on or off, open a result, and move between pages.";
+  "How to use Folio: enter a query, switch Web, Wikipedia, Grokipedia, and Images on or off, open a result, and move between pages.";
 const CANONICAL = "https://www.zip1.ai/how-to-search";
 
 export const Route = createFileRoute("/how-to-search")({
@@ -32,13 +32,13 @@ function HowToSearchPage() {
           The button stays disabled while the box is empty, so an empty search does not run.
         </p>
         <p>
-          Three switches choose the sources: Web, Wikipedia, and Grokipedia. They start on. Wikipedia and Grokipedia
-          are marked optional. After you search, the switches sit with the search box. On the home page they stay
-          hidden until every source is off. Then they appear under the message “Turn on Web, Wikipedia, or Grokipedia
-          to search.”
+          Four switches choose the sources: Web, Wikipedia, Grokipedia, and Images. Web, Wikipedia, and Grokipedia
+          start on. Images starts off. Wikipedia, Grokipedia, and Images are marked optional. After you search, the
+          switches sit with the search box. On the home page they stay hidden until every source is off. Then they
+          appear under the message “Turn on Web, Wikipedia, Grokipedia, or Images to search.”
         </p>
         <p>
-          Turning a switch off removes that source from the search. This browser stores the choice. If all three are
+          Turning a switch off removes that source from the search. This browser stores the choice. If all four are
           off, Folio does not fetch results, and the search button will not submit. Turn at least one source back on.
           If you are already on a results page and you switch the last source off, those source lists are no longer
           shown.
@@ -55,15 +55,25 @@ function HowToSearchPage() {
           and moves only that group.
         </p>
         <p>
+          Turn on Images to add a grid of pictures from Bing’s public image results, with SafeSearch set to moderate.
+          Each tile shows a thumbnail, a title, and the site the picture comes from. Images shows up to 24 pictures on
+          a page and goes up to 10 pages, with its own page controls like the other groups.
+        </p>
+        <p>
           Click the title or text of a result to open a preview panel. Close it with Escape or the close control.
           While it is open, the left and right arrow keys move to the previous or next result. Open page goes to the
           original address in this window. The arrow button on the result row opens that address in a new tab. When a
           lead card is shown, Read the article opens the article in this window as well.
         </p>
+        <p>
+          Click a picture to open the same preview with a larger copy of the image, its title, the site, and its size.
+          Open page goes to the page the picture was found on, in this window. The arrow on the tile opens that page in
+          a new tab, and View full-size image opens the picture itself in a new tab.
+        </p>
         <h2 className="pt-2 font-display text-2xl">Questions</h2>
         <h3 className="font-medium">What if every source is off?</h3>
         <p>
-          Folio does not run the search. Turn Web, Wikipedia, or Grokipedia on. The search button works again as soon
+          Folio does not run the search. Turn Web, Wikipedia, Grokipedia, or Images on. The search button works again as soon
           as one source is on and the box is not empty.
         </p>
         <h3 className="font-medium">What if one source does not respond?</h3>

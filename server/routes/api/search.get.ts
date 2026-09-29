@@ -11,6 +11,13 @@ function block(source: SourceBlock) {
       url: hit.url,
       snippet: hit.snippet,
       meta: hit.meta,
+      ...(hit.image
+        ? {
+            image: hit.image.full,
+            thumbnail: hit.image.thumb,
+            ...(hit.image.width && hit.image.height ? { width: hit.image.width, height: hit.image.height } : {}),
+          }
+        : {}),
     })),
   };
 }
@@ -29,6 +36,7 @@ export default async function searchRoute(event: { url: URL }): Promise<Response
         web: block(data.web),
         wiki: block(data.wiki),
         grok: block(data.grok),
+        ...(parsed.images ? { images: block(data.images) } : {}),
         deepDive: data.deepDive,
       },
       { headers: { "cache-control": "no-store" } },

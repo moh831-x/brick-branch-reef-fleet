@@ -1,8 +1,8 @@
 import { createServerFn } from "@tanstack/react-start";
-import { GROK_PAGE, MAX_PAGE, PAGE, WEB_PAGE } from "./search.shared";
+import { GROK_PAGE, IMAGES_PAGE, MAX_PAGE, PAGE, WEB_PAGE } from "./search.shared";
 import { runNetworkAd, runPreview, runSearch, runSuggest, runTrending, type HitPreview, type NetworkAd, type SearchInput, type SearchPayload, type SourceId, type Suggestion, type Trend } from "./search.server";
 
-export type { HitPreview, LeadCard, NetworkAd, PlaceRef, SearchHit, SearchInput, SearchPayload, SourceBlock, SourceId, Suggestion, Trend, WordDefinition, WordSense } from "./search.server";
+export type { HitPreview, ImageRef, LeadCard, NetworkAd, PlaceRef, SearchHit, SearchInput, SearchPayload, SourceBlock, SourceId, Suggestion, Trend, WordDefinition, WordSense } from "./search.server";
 
 function bool(value: unknown, fallback: boolean): boolean {
   if (typeof value === "boolean") return value;
@@ -11,7 +11,7 @@ function bool(value: unknown, fallback: boolean): boolean {
 
 function offsetOf(value: unknown): number {
   if (typeof value !== "number" || !Number.isFinite(value)) return 0;
-  return Math.max(0, Math.min((MAX_PAGE - 1) * Math.max(PAGE, GROK_PAGE, WEB_PAGE), Math.floor(value)));
+  return Math.max(0, Math.min((MAX_PAGE - 1) * Math.max(PAGE, GROK_PAGE, WEB_PAGE, IMAGES_PAGE), Math.floor(value)));
 }
 
 function readSearch(input: unknown): SearchInput {
@@ -24,9 +24,11 @@ function readSearch(input: unknown): SearchInput {
     web: bool(raw.web, true),
     wiki: bool(raw.wiki, true),
     grok: bool(raw.grok, true),
+    images: bool(raw.images, false),
     webOffset: offsetOf(raw.webOffset),
     wikiOffset: offsetOf(raw.wikiOffset),
     grokOffset: offsetOf(raw.grokOffset),
+    imagesOffset: offsetOf(raw.imagesOffset),
     card: raw.card !== false,
     near: typeof raw.near === "string" ? raw.near.trim().slice(0, 80) : "",
   };

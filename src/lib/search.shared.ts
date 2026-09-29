@@ -1,6 +1,9 @@
 export const PAGE = 8;
 export const WEB_PAGE = 10;
 export const GROK_PAGE = 12;
+/** Images per page, and the deepest image page Folio will ask for. */
+export const IMAGES_PAGE = 24;
+export const IMAGES_MAX_PAGE = 10;
 export const MAX_PAGE = 400;
 
 export function pageOf(value: unknown): number | undefined {
@@ -24,13 +27,15 @@ export type BotSearchQuery = {
   web: boolean;
   wiki: boolean;
   grok: boolean;
+  images: boolean;
   webOffset: number;
   wikiOffset: number;
   grokOffset: number;
+  imagesOffset: number;
 };
 
-function sourceFlag(value: string | null): boolean {
-  if (value === null || value.trim() === "") return true;
+function sourceFlag(value: string | null, fallback = true): boolean {
+  if (value === null || value.trim() === "") return fallback;
   const flag = value.trim().toLowerCase();
   return flag !== "0" && flag !== "false" && flag !== "off";
 }
@@ -40,21 +45,24 @@ function pageOffset(value: string | null, size: number): number {
   return (page - 1) * size;
 }
 
-/** Parameters for GET /api/search. Sources default on. Pages start at 1. */
+/** Parameters for GET /api/search. Web, Wikipedia, and Grokipedia default on; Images defaults off. Pages start at 1. */
 export function readBotSearch(params: URLSearchParams): BotSearchQuery | { error: string } {
   const q = (params.get("q") ?? "").replace(/\s+/g, " ").trim().slice(0, 180);
   if (!q) return { error: "Enter a search" };
   const web = sourceFlag(params.get("web"));
   const wiki = sourceFlag(params.get("wiki"));
   const grok = sourceFlag(params.get("grok"));
-  if (!web && !wiki && !grok) return { error: "Turn on Web, Wikipedia, or Grokipedia" };
+  const images = sourceFlag(params.get("images"), false);
+  if (!web && !wiki && !grok && !images) return { error: "Turn on Web, Wikipedia, Grokipedia, or Images" };
   return {
     q,
     web,
     wiki,
     grok,
+    images,
     webOffset: pageOffset(params.get("webPage"), WEB_PAGE),
     wikiOffset: pageOffset(params.get("wikiPage"), PAGE),
     grokOffset: pageOffset(params.get("grokPage"), GROK_PAGE),
+    imagesOffset: pageOffset(params.get("imagesPage"), IMAGES_PAGE),
   };
 }
