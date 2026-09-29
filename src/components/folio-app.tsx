@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { useNavigate, useRouterState } from "@tanstack/react-router";
-import { ArrowUp, ArrowUpRight, BookOpen, ChevronLeft, ChevronRight, Clock, Compass, Globe, Search, TrendingUp, X } from "lucide-react";
+import { ArrowUp, ArrowUpRight, BookOpen, ChevronLeft, ChevronRight, Clock, Compass, Globe, ImageIcon, Search, TrendingUp, X } from "lucide-react";
 import type { FolioSearch } from "@/routes/index";
 import {
   previewHit,
@@ -17,10 +17,13 @@ import {
   type Trend,
   type WordDefinition,
 } from "@/lib/search.functions";
-import { GROK_PAGE, MAX_PAGE, PAGE, WEB_PAGE, pageItems } from "@/lib/search.shared";
+import { GROK_PAGE, IMAGES_MAX_PAGE, IMAGES_PAGE, MAX_PAGE, PAGE, WEB_PAGE, pageItems } from "@/lib/search.shared";
 import { SiteFooter } from "@/components/site-footer";
 
-type Sources = { web: boolean; wiki: boolean; grok: boolean };
+type Sources = { web: boolean; wiki: boolean; grok: boolean; images: boolean };
+
+/** Web, Wikipedia, and Grokipedia start on. Images is opt-in, so a plain search costs no extra requests. */
+const DEFAULT_SOURCES: Sources = { web: true, wiki: true, grok: true, images: false };
 
 const STORAGE_SOURCES = "folio-sources";
 const STORAGE_RECENT = "folio-recent";
@@ -48,21 +51,28 @@ const SOURCE_META: Record<
     blurb: "xAI’s encyclopedia. A second write-up, only when you want it.",
     icon: Compass,
   },
+  images: {
+    label: "Images",
+    optional: true,
+    blurb: "Pictures from Bing’s public image results. Off until you turn it on.",
+    icon: ImageIcon,
+  },
 };
 
 function readSources(): Sources {
-  if (typeof window === "undefined") return { web: true, wiki: true, grok: true };
+  if (typeof window === "undefined") return DEFAULT_SOURCES;
   try {
     const raw = localStorage.getItem(STORAGE_SOURCES);
-    if (!raw) return { web: true, wiki: true, grok: true };
+    if (!raw) return DEFAULT_SOURCES;
     const parsed = JSON.parse(raw) as Partial<Sources>;
     return {
       web: parsed.web !== false,
       wiki: parsed.wiki !== false,
       grok: parsed.grok !== false,
+      images: parsed.images === true,
     };
   } catch {
-    return { web: true, wiki: true, grok: true };
+    return DEFAULT_SOURCES;
   }
 }
 
@@ -128,6 +138,7 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
     web: search.web !== false,
     wiki: search.wiki !== false,
     grok: search.grok !== false,
+    images: search.images === true,
   });
   const [recent, setRecent] = useState<string[]>([]);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
@@ -146,7 +157,7 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
     setDraft(query);
     setOpen(false);
     setActive(-1);
-  }, [query, search.web, search.wiki, search.grok]);
+  }, [query, search.web, search.wiki, search.grok, search.images]);
 
   useEffect(() => {
     if (!onResults) setSources(readSources());
@@ -155,10 +166,11 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
         web: search.web !== false,
         wiki: search.wiki !== false,
         grok: search.grok !== false,
+        images: search.images === true,
       });
     }
     setRecent(readRecent());
-  }, [onResults, search.web, search.wiki, search.grok]);
+  }, [onResults, search.web, search.wiki, search.grok, search.images]);
 
   useEffect(() => {
     const q = draft.trim();
@@ -210,7 +222,7 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
   useEffect(() => {
     if (!query) return;
     window.scrollTo(0, 0);
-  }, [query, search.webPage, search.wikiPage, search.grokPage]);
+  }, [query, search.webPage, search.wikiPage, search.grokPage, search.imagesPage]);
 
   useEffect(() => {
     function onKey(event: globalThis.KeyboardEvent) {
@@ -224,7 +236,7 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const anySource = sources.web || sources.wiki || sources.grok;
+  const anySource = sources.web || sources.wiki || sources.grok || sources.images;
 
   function persistSources(next: Sources) {
     setSources(next);
@@ -247,12 +259,19 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
 
   function go(value: string, nextSources = sources) {
     const q = value.trim();
-    if (!q || (!nextSources.web && !nextSources.wiki && !nextSources.grok)) return;
+    if (!q || (!nextSources.web && !nextSources.wiki && !nextSources.grok && !nextSources.images)) return;
     remember(q);
     setOpen(false);
     void navigate({
       to: "/",
-      search: { q, near: search.near, web: nextSources.web, wiki: nextSources.wiki, grok: nextSources.grok },
+      search: {
+        q,
+        near: search.near,
+        web: nextSources.web,
+        wiki: nextSources.wiki,
+        grok: nextSources.grok,
+        images: nextSources.images,
+      },
     });
   }
 
@@ -262,7 +281,7 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
     if (onResults) {
       void navigate({
         to: "/",
-        search: { q: query, near: search.near, web: next.web, wiki: next.wiki, grok: next.grok },
+        search: { q: query, near: search.near, web: next.web, wiki: next.wiki, grok: next.grok, images: next.images },
       });
     }
   }
@@ -311,9 +330,11 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
         web: search.web,
         wiki: search.wiki,
         grok: search.grok,
+        images: search.images,
         webPage: source === "web" ? next : search.webPage,
         wikiPage: source === "wiki" ? next : search.wikiPage,
         grokPage: source === "grok" ? next : search.grokPage,
+        imagesPage: source === "images" ? next : search.imagesPage,
       },
     });
   }
@@ -545,7 +566,7 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
           </button>
           {!anySource ? (
             <div className="mt-4 w-full max-w-xl">
-              <p className="mb-2 text-sm text-accent">Turn on Web, Wikipedia, or Grokipedia to search.</p>
+              <p className="mb-2 text-sm text-accent">Turn on Web, Wikipedia, Grokipedia, or Images to search.</p>
               {sourcePills}
             </div>
           ) : null}
@@ -556,7 +577,7 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
           </h2>
           <p className="mt-3 text-sm leading-relaxed text-muted">
             Submit a query in the search bar. Web results are included. Wikipedia and Grokipedia are optional sources
-            you can turn on or off.
+            you can turn on or off. Images is optional too and adds a grid of pictures when you switch it on.
           </p>
         </section>
         </>
@@ -572,6 +593,7 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
               web: search.webPage ?? 1,
               wiki: search.wikiPage ?? 1,
               grok: search.grokPage ?? 1,
+              images: search.imagesPage ?? 1,
             }}
             onPage={onPage}
             onDive={(value) => go(value)}
@@ -905,7 +927,7 @@ function Results({
   onPage: (source: SourceId, page: number) => void;
   onDive: (query: string) => void;
 }) {
-  const blocks: SourceId[] = (["web", "wiki", "grok"] as const).filter((key) => sources[key] && data);
+  const blocks: SourceId[] = (["web", "wiki", "grok", "images"] as const).filter((key) => sources[key] && data);
   const visible = blocks.map((key) => ({
     key,
     hits: data ? data[key].results : [],
@@ -944,7 +966,7 @@ function Results({
         </p>
       </div>
 
-      <div className="grid items-start gap-10 lg:grid-cols-[minmax(0,1fr)_20rem]">
+      <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-10 lg:grid-cols-[minmax(0,1fr)_20rem]">
         <div className="order-2 grid gap-10 lg:order-1">
           {!anyHits && !loading ? (
             <p className="text-muted">Nothing matched. Try fewer words, or switch on another source.</p>
@@ -952,11 +974,12 @@ function Results({
           {visible.map((block) => {
             const count = resultCount(block.total, block.key);
             const last = lastPage(
-              block.key === "web" ? undefined : block.total,
+              block.key === "web" || block.key === "images" ? undefined : block.total,
               block.page,
               block.hits.length,
               block.done,
-              block.key === "grok" ? GROK_PAGE : block.key === "web" ? WEB_PAGE : PAGE,
+              pageSize(block.key),
+              block.key === "images" ? IMAGES_MAX_PAGE : MAX_PAGE,
             );
             return (
               <section key={block.key} aria-labelledby={`source-${block.key}`} className="grid gap-3">
@@ -977,49 +1000,53 @@ function Results({
                     {block.page > 1 ? "Nothing on this page." : `No matches in ${SOURCE_META[block.key].label}.`}
                   </p>
                 ) : null}
-                <ul className="grid">
-                  {block.hits.map((hit, index) => (
-                    <Fragment key={hit.id}>
-                      <li className={`border-b border-line ${hit.id === openId ? "bg-accent-soft" : ""}`}>
-                        <div className="flex items-start gap-1">
-                          <button
-                            type="button"
-                            onClick={() => setOpenId(hit.id)}
-                            aria-pressed={hit.id === openId}
-                            className="group min-w-0 flex-1 px-1 py-4 text-left"
-                          >
-                            <p className="flex items-center gap-2 text-xs tracking-wide text-muted uppercase">
-                              <SiteLogo url={hit.url} />
-                              <span className="min-w-0 truncate">{hit.meta}</span>
-                            </p>
-                            <p className="mt-1 font-display text-xl leading-snug text-ink group-hover:text-accent">
-                              <Highlight text={hit.title} query={query} />
-                            </p>
-                            {hit.snippet ? (
-                              <p className="mt-1 line-clamp-2 text-sm leading-relaxed text-muted">
-                                <Highlight text={hit.snippet} query={query} />
+                {block.key === "images" ? (
+                  <ImageGrid hits={block.hits} query={query} openId={openId} onOpen={setOpenId} />
+                ) : (
+                  <ul className="grid grid-cols-[minmax(0,1fr)]">
+                    {block.hits.map((hit, index) => (
+                      <Fragment key={hit.id}>
+                        <li className={`border-b border-line ${hit.id === openId ? "bg-accent-soft" : ""}`}>
+                          <div className="flex items-start gap-1">
+                            <button
+                              type="button"
+                              onClick={() => setOpenId(hit.id)}
+                              aria-pressed={hit.id === openId}
+                              className="group min-w-0 flex-1 px-1 py-4 text-left"
+                            >
+                              <p className="flex items-center gap-2 text-xs tracking-wide text-muted uppercase">
+                                <SiteLogo url={hit.url} />
+                                <span className="min-w-0 truncate">{hit.meta}</span>
                               </p>
-                            ) : null}
-                          </button>
-                          <a
-                            href={hit.url}
-                            target="_blank"
-                            rel="noreferrer"
-                            aria-label={`Open ${hit.title} in a new tab`}
-                            className="mt-3 grid size-11 shrink-0 place-items-center rounded-full text-muted hover:text-accent"
-                          >
-                            <ArrowUpRight className="size-4" aria-hidden="true" />
-                          </a>
-                        </div>
-                      </li>
-                      {block.key === "web" && index === 0 && block.page === 1 && data.deepDive.length > 0 ? (
-                        <li className="border-b border-line py-4">
-                          <DeepDive topic={query} items={data.deepDive} onPick={onDive} />
+                              <p className="mt-1 font-display text-xl leading-snug text-ink group-hover:text-accent">
+                                <Highlight text={hit.title} query={query} />
+                              </p>
+                              {hit.snippet ? (
+                                <p className="mt-1 line-clamp-2 text-sm leading-relaxed text-muted">
+                                  <Highlight text={hit.snippet} query={query} />
+                                </p>
+                              ) : null}
+                            </button>
+                            <a
+                              href={hit.url}
+                              target="_blank"
+                              rel="noreferrer"
+                              aria-label={`Open ${hit.title} in a new tab`}
+                              className="mt-3 grid size-11 shrink-0 place-items-center rounded-full text-muted hover:text-accent"
+                            >
+                              <ArrowUpRight className="size-4" aria-hidden="true" />
+                            </a>
+                          </div>
                         </li>
-                      ) : null}
-                    </Fragment>
-                  ))}
-                </ul>
+                        {block.key === "web" && index === 0 && block.page === 1 && data.deepDive.length > 0 ? (
+                          <li className="border-b border-line py-4">
+                            <DeepDive topic={query} items={data.deepDive} onPick={onDive} />
+                          </li>
+                        ) : null}
+                      </Fragment>
+                    ))}
+                  </ul>
+                )}
                 <Pager
                   label={SOURCE_META[block.key].label}
                   page={block.page}
@@ -1029,6 +1056,9 @@ function Results({
                 />
                 {block.key === "web" && block.hits.length > 0 ? (
                   <p className="text-xs text-muted">Web listings via Bing’s public results feed.</p>
+                ) : null}
+                {block.key === "images" && block.hits.length > 0 ? (
+                  <p className="text-xs text-muted">Images via Bing’s public image results, with SafeSearch set to moderate.</p>
                 ) : null}
               </section>
             );
@@ -1062,6 +1092,90 @@ function Results({
   );
 }
 
+function ImageGrid({
+  hits,
+  query,
+  openId,
+  onOpen,
+}: {
+  hits: SearchHit[];
+  query: string;
+  openId: string | null;
+  onOpen: (id: string) => void;
+}) {
+  if (!hits.length) return null;
+  return (
+    <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
+      {hits.map((hit) => {
+        const open = hit.id === openId;
+        return (
+          <li
+            key={hit.id}
+            className={`group relative overflow-hidden rounded-2xl border bg-surface ${
+              open ? "border-accent ring-2 ring-accent" : "border-line"
+            }`}
+          >
+            <button type="button" onClick={() => onOpen(hit.id)} aria-pressed={open} className="block w-full text-left">
+              <span className="block aspect-[4/3] overflow-hidden bg-line">
+                {hit.image ? (
+                  <img
+                    src={hit.image.thumb}
+                    alt={hit.title}
+                    loading="lazy"
+                    decoding="async"
+                    referrerPolicy="no-referrer"
+                    className="h-full w-full object-cover transition-transform duration-200 ease-out group-hover:scale-[1.03]"
+                  />
+                ) : null}
+              </span>
+              <span className="block px-3 pt-2 pb-3">
+                <span className="line-clamp-2 text-sm leading-snug text-ink group-hover:text-accent">
+                  <Highlight text={hit.title} query={query} />
+                </span>
+                <span className="mt-1.5 flex items-center gap-1.5 text-xs text-muted">
+                  <SiteLogo url={hit.url} />
+                  <span className="min-w-0 truncate">{siteHost(hit.url)}</span>
+                </span>
+              </span>
+            </button>
+            <a
+              href={hit.url}
+              target="_blank"
+              rel="noreferrer"
+              aria-label={`Open ${hit.title} in a new tab`}
+              className="absolute top-1 right-1 grid size-11 place-items-center"
+            >
+              <span className="grid size-8 place-items-center rounded-full bg-surface/90 text-ink shadow-sm hover:text-accent">
+                <ArrowUpRight className="size-4" aria-hidden="true" />
+              </span>
+            </a>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+function PeekImage({ image, title }: { image: NonNullable<SearchHit["image"]>; title: string }) {
+  const [src, setSrc] = useState(image.full);
+  const ratio = image.width && image.height ? `${image.width} / ${image.height}` : undefined;
+  return (
+    <div className="mb-4 grid place-items-center overflow-hidden rounded-xl bg-line">
+      <img
+        src={src}
+        alt={title}
+        referrerPolicy="no-referrer"
+        decoding="async"
+        style={ratio ? { aspectRatio: ratio } : undefined}
+        onError={() => {
+          if (src !== image.thumb) setSrc(image.thumb);
+        }}
+        className="max-h-[55vh] w-full object-contain"
+      />
+    </div>
+  );
+}
+
 function ResultPeek({
   hit,
   index,
@@ -1088,7 +1202,7 @@ function ResultPeek({
   useEffect(() => {
     let cancelled = false;
     setPreview(null);
-    if (hit.source === "web") return;
+    if (hit.source === "web" || hit.source === "images") return;
     previewHit({ data: { source: hit.source, title: hit.title, url: hit.url, snippet: hit.snippet } })
       .then((row) => {
         if (!cancelled) setPreview(row);
@@ -1177,7 +1291,9 @@ function ResultPeek({
           </div>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-6">
-          {videoId ? (
+          {hit.image ? (
+            <PeekImage key={hit.id} image={hit.image} title={hit.title} />
+          ) : videoId ? (
             <div className="mb-4 aspect-video overflow-hidden rounded-xl bg-ink">
               <iframe
                 key={videoId}
@@ -1203,7 +1319,18 @@ function ResultPeek({
               </p>
             ))}
           </div>
-          {!preview && hit.source !== "web" ? <p className="mt-4 text-sm text-muted">Loading the full preview…</p> : null}
+          {hit.image ? (
+            <a
+              href={hit.image.full}
+              target="_blank"
+              rel="noreferrer"
+              className="mt-4 inline-flex min-h-11 items-center gap-1 text-sm font-medium text-ink hover:text-accent"
+            >
+              View full-size image
+              <ArrowUpRight className="size-4" aria-hidden="true" />
+            </a>
+          ) : null}
+          {!preview && hit.source !== "web" && hit.source !== "images" ? <p className="mt-4 text-sm text-muted">Loading the full preview…</p> : null}
         </div>
         <div className="border-t border-line p-4">
           <a
@@ -1226,11 +1353,26 @@ function resultCount(total: number | undefined, source: SourceId): string | null
   return `${shown} result${total === 1 ? "" : "s"}`;
 }
 
-function lastPage(total: number | undefined, page: number, count: number, done: boolean, pageSize: number): number | null {
+function pageSize(source: SourceId): number {
+  if (source === "web") return WEB_PAGE;
+  if (source === "grok") return GROK_PAGE;
+  if (source === "images") return IMAGES_PAGE;
+  return PAGE;
+}
+
+function lastPage(
+  total: number | undefined,
+  page: number,
+  count: number,
+  done: boolean,
+  pageSize: number,
+  cap: number = MAX_PAGE,
+): number | null {
   if (typeof total === "number" && total > 0 && !(done && count === 0)) {
-    return Math.max(1, Math.min(MAX_PAGE, Math.ceil(total / pageSize)));
+    return Math.max(1, Math.min(cap, Math.ceil(total / pageSize)));
   }
   if (done) return Math.max(1, count === 0 && page > 1 ? page - 1 : page);
+  if (page >= cap) return cap;
   return null;
 }
 
