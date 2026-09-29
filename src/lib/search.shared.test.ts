@@ -52,3 +52,14 @@ describe("readBotSearch ai", () => {
     assert.ok("error" in read("q=golden+retriever&web=0&wiki=0&grok=0&ai=1"));
   });
 });
+
+describe("readBotSearch ai_model", () => {
+  it("reads the provider pick and ignores unknown values", () => {
+    const picked = read("q=dogs&ai=1&ai_model=claude");
+    assert.ok(!("error" in picked));
+    assert.equal(picked.aiModel, "claude");
+    const unknown = read("q=dogs&ai=1&ai_model=nope");
+    assert.ok(!("error" in unknown));
+    assert.equal(unknown.aiModel, undefined);
+  });
+});

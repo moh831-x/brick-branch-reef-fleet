@@ -62,11 +62,19 @@ function HowToSearchPage() {
         </p>
         <p>
           Turn on AI to add a short answer at the top of the results. Folio waits for the other sources, then sends
-          your search and the titles, snippets, and addresses of the top Web, Wikipedia, and Grokipedia results to
-          xAI, which writes a few sentences from them. Numbers in the answer link to the results it used, and the
-          list under it opens each one in a new tab. The card is labeled as AI-generated because it can be wrong or
-          leave things out, so check the sources. The other results show while the answer is written. Your search
-          goes to xAI only when AI is on.
+          your search and the top results from every source that is on to the AI provider you picked, which writes a
+          few sentences from them. For Web, Wikipedia, and Grokipedia that means titles, snippets, and addresses. For
+          Images it means each picture’s title and the page it was found on. Numbers in the answer link to the
+          results it used, and the list under it opens each one in a new tab. The card is labeled as AI-generated
+          because it can be wrong or leave things out, so check the sources. The other results show while the answer
+          is written. Your search goes to an AI provider only when AI is on.
+        </p>
+        <p>
+          When AI is on, the card has three choices: Grok (from xAI), ChatGPT (from OpenAI), and Claude (from
+          Anthropic). A choice that this copy of Folio has not connected is grayed out and says not set up. The first
+          one that is set up is picked for you, in that order. This browser remembers your pick, and it is also part
+          of the page address. If the provider you picked does not answer, Folio asks the next one that is set up, and
+          the note under the answer says which one wrote it.
         </p>
         <p>
           Click the title or text of a result to open a preview panel. Close it with Escape or the close control.
@@ -91,8 +99,9 @@ function HowToSearchPage() {
         </p>
         <h3 className="font-medium">What if the AI answer does not load?</h3>
         <p>
-          The AI card shows a short note, and you can try again. The other results stay as they are. If the card says
-          AI answers aren’t set up yet, this copy of Folio has no AI provider connected.
+          Folio first tries the other providers that are set up. If none of them answers, the AI card shows a short
+          note, and you can try again. The other results stay as they are. If the card says AI answers aren’t set up
+          yet, this copy of Folio has no AI provider connected.
         </p>
         <h3 className="font-medium">What if nothing matches?</h3>
         <p>

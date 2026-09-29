@@ -61,7 +61,7 @@ function PrivacyPage() {
           </li>
           <li>
             AI answers are off unless you turn them on. Only then does your search, with the top
-            results, go to xAI.
+            results, go to the AI provider you picked (xAI, OpenAI, or Anthropic).
           </li>
           <li>
             Your source settings and recent searches are kept in your browser, not on our server.
@@ -93,9 +93,13 @@ function PrivacyPage() {
             Grokipedia is on.
           </li>
           <li>
-            <span className="font-medium">xAI</span>: your search, plus the titles, snippets, and
-            addresses of the top Web, Wikipedia, and Grokipedia results, to write the AI answer, only
-            when AI is on. xAI handles that request under its own API terms and privacy policy.
+            <span className="font-medium">One AI provider</span>, only when AI is on: xAI for Grok,
+            OpenAI for ChatGPT, or Anthropic for Claude, whichever you picked. It receives your search
+            plus the titles, snippets, and addresses of the top results from the sources that are on
+            (for Images, each picture’s title and the page it was found on), to write the AI answer.
+            The other two providers receive nothing. If the provider you picked does not answer, Folio
+            sends the same request to the next provider that is set up, and the answer says which one
+            wrote it. Each provider handles the request under its own API terms and privacy policy.
           </li>
           <li>
             <span className="font-medium">Datamuse</span>: short definitions for words in your
@@ -120,14 +124,15 @@ function PrivacyPage() {
           <span className="font-mono">/?q=…</span>), so it appears in your browser history and in
           the address you share if you copy the link. The public search endpoint at{" "}
           <span className="font-mono">/api/search</span> works the same way. The query is in the
-          address, and results come from the same services. It sends the query to xAI only when the
-          address asks for an AI answer (<span className="font-mono">ai=1</span>).
+          address, and results come from the same services. It sends the query to an AI provider only
+          when the address asks for an AI answer (<span className="font-mono">ai=1</span>).
         </p>
 
         <h2 className="pt-2 font-display text-2xl">What stays in your browser</h2>
-        <p>Folio keeps three items in your browser’s local storage for this site:</p>
+        <p>Folio keeps four items in your browser’s local storage for this site:</p>
         <ul className="grid list-disc gap-2 pl-5">
           <li>which sources you turned on or off;</li>
+          <li>which AI provider you picked, if you picked one;</li>
           <li>your last six searches, shown under Recent;</li>
           <li>whether you turned sponsored listings on.</li>
         </ul>
@@ -184,7 +189,9 @@ function PrivacyPage() {
           Related policies: <Out href="https://policies.google.com/privacy">Google</Out>,{" "}
           <Out href="https://www.microsoft.com/privacy/privacystatement">Microsoft</Out>,{" "}
           <Out href="https://foundation.wikimedia.org/wiki/Policy:Privacy_policy">Wikimedia</Out>,{" "}
-          <Out href="https://x.ai/legal/privacy-policy">xAI</Out>.
+          <Out href="https://x.ai/legal/privacy-policy">xAI</Out>,{" "}
+          <Out href="https://openai.com/policies/privacy-policy">OpenAI</Out>,{" "}
+          <Out href="https://www.anthropic.com/legal/privacy">Anthropic</Out>.
         </p>
 
         <h2 className="pt-2 font-display text-2xl">Ads</h2>
@@ -229,7 +236,7 @@ function PrivacyPage() {
         <h2 className="pt-2 font-display text-2xl">Your choices</h2>
         <ul className="grid list-disc gap-2 pl-5">
           <li>Turn Wikipedia, Grokipedia, or Images off so a search skips them.</li>
-          <li>Leave AI off so your search is never sent to xAI.</li>
+          <li>Leave AI off so your search is never sent to an AI provider.</li>
           <li>Clear Recent, or clear this site’s data in your browser.</li>
           <li>Leave sponsored listings off.</li>
           <li>

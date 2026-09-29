@@ -1,6 +1,16 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { AI_MAX_CONTEXT, buildAiPrompt, cleanContextItem, parseAiAnswer, pickAiContext, type AiContextItem } from "./ai.shared.ts";
+import {
+  AI_MAX_CONTEXT,
+  aiProviderOf,
+  aiProviderOrder,
+  buildAiPrompt,
+  cleanContextItem,
+  parseAiAnswer,
+  pickAiContext,
+  selectedAiProvider,
+  type AiContextItem,
+} from "./ai.shared.ts";
 
 const hit = (n: number, host = "example.com") => ({ title: `Title ${n}`, url: `https://${host}/${n}`, snippet: `Snippet ${n}` });
 
@@ -31,11 +41,52 @@ describe("pickAiContext", () => {
   });
 });
 
+describe("pickAiContext with Images", () => {
+  it("includes image results with their title and source page when Images is on", () => {
+    const picked = pickAiContext({
+      web: { results: [hit(1)] },
+      images: { results: [{ title: "A golden retriever", url: "https://dogs.example/page", snippet: "" }] },
+    });
+    assert.deepEqual(
+      picked.map((item) => item.source),
+      ["web", "images"],
+    );
+    assert.equal(picked[1].url, "https://dogs.example/page");
+    assert.equal(picked[1].snippet, "Image found on dogs.example");
+    assert.match(buildAiPrompt("dogs", picked), /\[2\] A golden retriever \(Images, https:\/\/dogs\.example\/page\)/);
+  });
+
+  it("can answer from Images alone", () => {
+    assert.equal(pickAiContext({ images: { results: [hit(1)] } }).length, 1);
+  });
+});
+
+describe("AI providers", () => {
+  it("parses ai_model values", () => {
+    assert.equal(aiProviderOf("OpenAI"), "openai");
+    assert.equal(aiProviderOf("claude"), "claude");
+    assert.equal(aiProviderOf("gemini"), undefined);
+    assert.equal(aiProviderOf(undefined), undefined);
+  });
+
+  it("defaults to the first set-up provider in the order Grok, ChatGPT, Claude", () => {
+    assert.equal(selectedAiProvider(undefined, ["claude", "openai"]), "openai");
+    assert.equal(selectedAiProvider(undefined, ["claude"]), "claude");
+    assert.equal(selectedAiProvider(undefined, []), undefined);
+  });
+
+  it("tries the reader's pick first, then falls back in order", () => {
+    assert.deepEqual(aiProviderOrder("claude", ["grok", "openai", "claude"]), ["claude", "grok", "openai"]);
+    assert.deepEqual(aiProviderOrder("openai", ["claude", "grok"]), ["grok", "claude"]);
+  });
+});
+
 describe("cleanContextItem", () => {
   it("drops items without an http(s) address or a title", () => {
     assert.equal(cleanContextItem({ source: "web", title: "x", url: "javascript:alert(1)", snippet: "" }), null);
     assert.equal(cleanContextItem({ source: "web", title: "", url: "https://a.example", snippet: "" }), null);
-    assert.equal(cleanContextItem({ source: "images", title: "x", url: "https://a.example", snippet: "" }), null);
+    assert.equal(cleanContextItem({ source: "videos", title: "x", url: "https://a.example", snippet: "" }), null);
+    assert.ok(cleanContextItem({ source: "images", title: "x", url: "https://a.example", snippet: "" }));
     assert.ok(cleanContextItem({ source: "wiki", title: "x", url: "https://a.example", snippet: "y".repeat(2000) })!.snippet.length <= 400);
   });
 });

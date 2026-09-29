@@ -39,9 +39,10 @@ function AboutPage() {
         </p>
         <p>
           Web, Wikipedia, and Grokipedia start switched on. Images starts off and adds a grid of pictures from Bing’s
-          public image results when you turn it on. AI starts off too. When you turn it on, a short answer written by
-          xAI’s Grok from the top results sits above the lists, with numbered links to the results it used. It is
-          labeled as AI-generated and can be wrong. Wikipedia, Grokipedia, Images, and AI are marked optional. You can turn
+          public image results when you turn it on. AI starts off too. When you turn it on, a short answer sits above the
+          lists, with numbered links to the results it used. It is written from the top results of every source that
+          is on by the provider you pick: Grok from xAI, ChatGPT from OpenAI, or Claude from Anthropic. It is labeled
+          as AI-generated and can be wrong. Wikipedia, Grokipedia, Images, and AI are marked optional. You can turn
           any source on or off, and this browser remembers the choice. If every source is off, Folio does not run a
           search. The search button stays disabled, and the home page asks you to turn Web, Wikipedia, Grokipedia, or
           Images on again.
