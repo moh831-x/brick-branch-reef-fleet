@@ -28,6 +28,8 @@ export type BotSearchQuery = {
   wiki: boolean;
   grok: boolean;
   images: boolean;
+  /** Optional AI answer built from the top Web, Wikipedia, and Grokipedia results. Off unless asked for. */
+  ai: boolean;
   webOffset: number;
   wikiOffset: number;
   grokOffset: number;
@@ -45,7 +47,10 @@ function pageOffset(value: string | null, size: number): number {
   return (page - 1) * size;
 }
 
-/** Parameters for GET /api/search. Web, Wikipedia, and Grokipedia default on; Images defaults off. Pages start at 1. */
+/**
+ * Parameters for GET /api/search. Web, Wikipedia, and Grokipedia default on; Images and AI default off.
+ * AI is not a results list, so it does not count as a source on its own. Pages start at 1.
+ */
 export function readBotSearch(params: URLSearchParams): BotSearchQuery | { error: string } {
   const q = (params.get("q") ?? "").replace(/\s+/g, " ").trim().slice(0, 180);
   if (!q) return { error: "Enter a search" };
@@ -53,6 +58,7 @@ export function readBotSearch(params: URLSearchParams): BotSearchQuery | { error
   const wiki = sourceFlag(params.get("wiki"));
   const grok = sourceFlag(params.get("grok"));
   const images = sourceFlag(params.get("images"), false);
+  const ai = sourceFlag(params.get("ai"), false);
   if (!web && !wiki && !grok && !images) return { error: "Turn on Web, Wikipedia, Grokipedia, or Images" };
   return {
     q,
@@ -60,6 +66,7 @@ export function readBotSearch(params: URLSearchParams): BotSearchQuery | { error
     wiki,
     grok,
     images,
+    ai,
     webOffset: pageOffset(params.get("webPage"), WEB_PAGE),
     wikiOffset: pageOffset(params.get("wikiPage"), PAGE),
     grokOffset: pageOffset(params.get("grokPage"), GROK_PAGE),
