@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { useNavigate, useRouterState } from "@tanstack/react-router";
-import { ArrowUp, ArrowUpRight, BookOpen, ChevronLeft, ChevronRight, Clock, Compass, Globe, ImageIcon, Search, TrendingUp, X } from "lucide-react";
+import { ArrowUp, ArrowUpRight, BookOpen, ChevronLeft, ChevronRight, Clock, Compass, Globe, ImageIcon, Search, Share, TrendingUp, X } from "lucide-react";
 import type { FolioSearch } from "@/routes/index";
 import {
   previewHit,
@@ -19,6 +19,7 @@ import {
 } from "@/lib/search.functions";
 import { GROK_PAGE, IMAGES_MAX_PAGE, IMAGES_PAGE, MAX_PAGE, PAGE, WEB_PAGE, pageItems } from "@/lib/search.shared";
 import { SiteFooter } from "@/components/site-footer";
+import { shareNative, tap, useIsNativeApp } from "@/lib/native";
 
 type Sources = { web: boolean; wiki: boolean; grok: boolean; images: boolean };
 
@@ -260,6 +261,7 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
   function go(value: string, nextSources = sources) {
     const q = value.trim();
     if (!q || (!nextSources.web && !nextSources.wiki && !nextSources.grok && !nextSources.images)) return;
+    tap("medium");
     remember(q);
     setOpen(false);
     void navigate({
@@ -277,6 +279,7 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
 
   function toggle(key: SourceId) {
     const next = { ...sources, [key]: !sources[key] };
+    tap("select");
     persistSources(next);
     if (onResults) {
       void navigate({
@@ -322,6 +325,7 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
 
   function onPage(source: SourceId, page: number) {
     const next = page <= 1 ? undefined : page;
+    tap("light");
     void navigate({
       to: "/",
       search: {
@@ -961,9 +965,17 @@ function Results({
     <div className={loading ? "opacity-70" : undefined}>
       <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
         <h1 className="font-display text-4xl text-ink sm:text-5xl">{query}</h1>
-        <p className="text-sm text-muted tabular-nums" aria-live="polite">
-          {enabled} · {formatTook(data.tookMs)}
-        </p>
+        <div className="flex items-center gap-2">
+          <p className="text-sm text-muted tabular-nums" aria-live="polite">
+            {enabled} · {formatTook(data.tookMs)}
+          </p>
+          <NativeShareButton
+            title={`${query} — Folio`}
+            text={`Search results for “${query}” on Folio`}
+            url={() => window.location.href}
+            label="Share these results"
+          />
+        </div>
       </div>
 
       <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-10 lg:grid-cols-[minmax(0,1fr)_20rem]">
@@ -1001,7 +1013,11 @@ function Results({
                   </p>
                 ) : null}
                 {block.key === "images" ? (
-                  <ImageGrid hits={block.hits} query={query} openId={openId} onOpen={setOpenId} />
+                  <ImageGrid hits={block.hits} query={query} openId={openId} onOpen={(id) => {
+                      tap("light");
+                      setOpenId(id);
+                    }}
+                  />
                 ) : (
                   <ul className="grid grid-cols-[minmax(0,1fr)]">
                     {block.hits.map((hit, index) => (
@@ -1010,7 +1026,10 @@ function Results({
                           <div className="flex items-start gap-1">
                             <button
                               type="button"
-                              onClick={() => setOpenId(hit.id)}
+                              onClick={() => {
+                                tap("light");
+                                setOpenId(hit.id);
+                              }}
                               aria-pressed={hit.id === openId}
                               className="group min-w-0 flex-1 px-1 py-4 text-left"
                             >
@@ -1332,7 +1351,7 @@ function ResultPeek({
           ) : null}
           {!preview && hit.source !== "web" && hit.source !== "images" ? <p className="mt-4 text-sm text-muted">Loading the full preview…</p> : null}
         </div>
-        <div className="border-t border-line p-4">
+        <div className="flex gap-2 border-t border-line p-4">
           <a
             href={pageUrl}
             className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-full bg-ink px-4 text-sm font-medium text-bg"
@@ -1340,9 +1359,46 @@ function ResultPeek({
             Open page
             <ArrowUpRight className="size-4" aria-hidden="true" />
           </a>
+          <NativeShareButton
+            title={preview?.title || hit.title}
+            url={() => pageUrl}
+            label="Share this page"
+            className="border border-line"
+          />
         </div>
       </aside>
     </div>
+  );
+}
+
+/** Share button shown only inside the iOS app (native share sheet). Renders nothing in browsers. */
+function NativeShareButton({
+  title,
+  text,
+  url,
+  label,
+  className = "",
+}: {
+  title: string;
+  text?: string;
+  url: () => string;
+  label: string;
+  className?: string;
+}) {
+  const native = useIsNativeApp();
+  if (!native) return null;
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      onClick={() => {
+        tap("light");
+        void shareNative({ title, text, url: url() });
+      }}
+      className={`grid size-11 shrink-0 place-items-center rounded-full text-ink transition-transform duration-150 ease-out active:scale-[0.96] ${className}`}
+    >
+      <Share className="size-4" aria-hidden="true" />
+    </button>
   );
 }
 
