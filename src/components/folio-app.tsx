@@ -1,12 +1,13 @@
 import { Fragment, useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
-import { ArrowUp, ArrowUpRight, BookOpen, ChevronDown, ChevronLeft, ChevronRight, Clock, Compass, Globe, ImageIcon, RotateCw, Search, Share, Sparkles, TrendingUp, X } from "lucide-react";
+import { ArrowUp, ArrowUpRight, BookOpen, ChevronDown, ChevronLeft, ChevronRight, Clock, Compass, Globe, ImageIcon, Pause, Play, RotateCw, Search, Share, Sparkles, Square, TrendingUp, Volume2, X } from "lucide-react";
 import type { FolioSearch } from "@/routes/index";
 import {
   answerWithAi,
   listAiProviders,
   previewHit,
   suggestQueries,
+  translatePreview,
   trendingTopics,
   type HitPreview,
   type SearchHit,
@@ -16,6 +17,7 @@ import {
   type PlaceRef,
   type Trend,
   type WordDefinition,
+  type PreviewSection,
 } from "@/lib/search.functions";
 import { GROK_PAGE, IMAGES_MAX_PAGE, IMAGES_PAGE, MAX_PAGE, PAGE, WEB_PAGE, pageItems } from "@/lib/search.shared";
 import {
@@ -30,6 +32,7 @@ import {
   type AiPart,
 } from "@/lib/ai.shared";
 import { SiteFooter } from "@/components/site-footer";
+import { UI, fill, sourceLabel, type UiCopy } from "@/lib/ui-copy";
 import { shareNative, tap, useIsNativeApp } from "@/lib/native";
 
 type Sources = { web: boolean; wiki: boolean; grok: boolean; images: boolean; ai: boolean };
@@ -173,6 +176,18 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(-1);
   const [chrome, setChrome] = useState<"full" | "hidden" | "search">("full");
+  const [uiLang, setUiLang] = useState<ReadLang>("en-US");
+  useEffect(() => {
+    setUiLang(readStoredLang());
+  }, []);
+  useEffect(() => {
+    document.documentElement.lang = uiLang;
+  }, [uiLang]);
+  function chooseUiLang(next: ReadLang) {
+    setUiLang(next);
+    storeReadLang(next);
+  }
+  const copy = UI[uiLang];
   useEffect(() => {
     setAiModel(search.ai_model ?? readAiModel());
   }, [search.ai_model]);
@@ -412,7 +427,7 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
   const searchForm = (
     <form onSubmit={onSubmit} className="relative" role="search">
       <label htmlFor="folio-q" className="sr-only">
-        Search
+        {copy.search}
       </label>
       <div
         className="flex min-h-14 items-center gap-2 rounded-2xl border border-line bg-surface px-3 focus-within:border-accent"
@@ -436,7 +451,7 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
           onFocus={() => setOpen(true)}
           onBlur={() => window.setTimeout(() => setOpen(false), 140)}
           onKeyDown={onKeyDown}
-          placeholder="Search"
+          placeholder={copy.search}
           autoComplete="off"
           enterKeyHint="search"
           role="combobox"
@@ -448,7 +463,7 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
         {draft ? (
           <button
             type="button"
-            aria-label="Clear search"
+            aria-label={copy.clearSearch}
             onClick={() => {
               setDraft("");
               setOpen(true);
@@ -463,6 +478,7 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
           models={aiModels}
           selected={Array.isArray(aiModels) ? selectedAiModel(aiModel, aiModels.filter((row) => row.available).map((row) => row.id)) : aiModel}
           compact
+          copy={copy}
           onOpenChange={(next) => {
             if (next) setOpen(false);
           }}
@@ -471,7 +487,7 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
         <button
           type="submit"
           disabled={!draft.trim() || !anySource}
-          aria-label="Search"
+          aria-label={copy.search}
           className="inline-flex size-11 shrink-0 items-center justify-center rounded-full bg-ink text-bg transition-transform duration-150 ease-out active:scale-[0.96] disabled:opacity-40"
         >
           <ArrowUp className="size-4" />
@@ -500,7 +516,7 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
               >
                 <span className="truncate">{item.title}</span>
                 <span className="shrink-0 text-xs tracking-wide text-muted uppercase">
-                  {item.source === "wiki" ? "Wikipedia" : "Grokipedia"}
+                  {item.source === "wiki" ? copy.wiki : copy.grok}
                 </span>
               </button>
             ))
@@ -508,7 +524,7 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
             <>
               {trends.length > 0 ? (
                 <div className="pb-1">
-                  <p className="px-4 pt-3 pb-1 text-sm text-muted">Trending now</p>
+                  <p className="px-4 pt-3 pb-1 text-sm text-muted">{copy.trending}</p>
                   {trends.map((item, index) => (
                     <button
                       key={item.slug}
@@ -541,7 +557,7 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
               {recent.length > 0 ? (
                 <div className="pb-2">
                   <div className="flex items-center justify-between px-4 pt-2">
-                    <p className="text-sm text-muted">Recent</p>
+                    <p className="text-sm text-muted">{copy.recent}</p>
                     <button
                       type="button"
                       onMouseDown={(event) => {
@@ -550,7 +566,7 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
                       }}
                       className="min-h-11 px-2 text-sm text-muted"
                     >
-                      Clear
+                      {copy.clear}
                     </button>
                   </div>
                   {recent.map((item, index) => {
@@ -586,7 +602,7 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
   const sourcePills = (
     <div className="flex flex-wrap gap-2">
       {(Object.keys(SOURCE_META) as PillId[]).map((key) => (
-        <SourcePill key={key} id={key} on={sources[key]} onToggle={() => toggle(key)} />
+        <SourcePill key={key} id={key} on={sources[key]} copy={copy} onToggle={() => toggle(key)} />
       ))}
     </div>
   );
@@ -619,48 +635,40 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
       ) : (
         <>
         <header className="flex min-h-screen flex-col items-center bg-bg px-4 pt-[18vh]">
+          <div className="fixed top-4 right-4 z-30">
+            <LanguagePreference lang={uiLang} onChange={chooseUiLang} />
+          </div>
           <h1 className="mb-6 max-w-xl text-center font-display text-4xl leading-tight tracking-tight text-ink sm:text-5xl">
-            Search the web, Wikipedia, and Grokipedia
+            {copy.h1}
           </h1>
           <div className="w-full max-w-xl">{searchForm}</div>
           <p className="mt-4 max-w-xl text-center text-sm leading-relaxed text-muted">
-            Search the web with Folio by Zip1. Explore web results and optional Wikipedia and Grokipedia sources from
-            one simple search interface.
+            {copy.blurb}
           </p>
           {!anySource ? (
             <div className="mt-4 w-full max-w-xl">
-              <p className="mb-2 text-sm text-accent">Turn on Web, Wikipedia, Grokipedia, or Images to search.</p>
+              <p className="mb-2 text-sm text-accent">{copy.sourcesOff}</p>
               {sourcePills}
             </div>
           ) : null}
         </header>
         <section aria-labelledby="how-folio" className="mx-auto max-w-xl px-4 pb-16">
           <h2 id="how-folio" className="font-display text-2xl text-ink">
-            How Folio works
+            {copy.howTitle}
           </h2>
           <div className="mt-3 grid gap-3 text-sm leading-relaxed text-muted">
+            <p>{copy.how1}</p>
+            <p>{copy.how2}</p>
             <p>
-              Type a query in the search bar and press the search button. The model menu in that bar chooses which
-              model writes the short AI answer. Every search includes that answer, with numbered links to the results
-              it used. The answer can be wrong or leave things out, so the lists under it are there to check.
-            </p>
-            <p>
-              Web results are included. Wikipedia and Grokipedia start on, and you can turn either one off. Images
-              starts off. Turning it on adds pictures from Bing’s public image results. If Web, Wikipedia, Grokipedia,
-              and Images are all off, the search button stays disabled until one of them is on again. After a search,
-              those switches sit with the search box. On this page they stay hidden until every source is off.
-            </p>
-            <p>
-              Select a result to open a preview in this window. Open page leaves Folio and goes to that address in the
-              same window.{" "}
+              {copy.how3before}{" "}
               <Link to="/how-to-search" className="text-accent">
-                How to search
+                {copy.howTo}
               </Link>{" "}
-              explains the model menu, pages, and previews.{" "}
+              {copy.how3mid}{" "}
               <Link to="/about" className="text-accent">
-                About Folio
+                {copy.about}
               </Link>{" "}
-              explains what this site is and what it is not.
+              {copy.how3after}
             </p>
           </div>
         </section>
@@ -682,15 +690,18 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
             onPage={onPage}
             onDive={(value) => go(value)}
             aiModel={aiModel}
+            lang={uiLang}
+            onLang={chooseUiLang}
+            copy={copy}
           />
         </main>
       ) : null}
-      <SiteFooter />
+      <SiteFooter copy={copy} />
     </div>
   );
 }
 
-function SourcePill({ id, on, onToggle }: { id: PillId; on: boolean; onToggle: () => void }) {
+function SourcePill({ id, on, copy, onToggle }: { id: PillId; on: boolean; copy: UiCopy; onToggle: () => void }) {
   const meta = SOURCE_META[id];
   const Icon = meta.icon;
   return (
@@ -703,9 +714,9 @@ function SourcePill({ id, on, onToggle }: { id: PillId; on: boolean; onToggle: (
       }`}
     >
       <Icon className="size-4" aria-hidden="true" />
-      {meta.label}
-      {meta.optional ? <span className="text-xs text-muted">optional</span> : null}
-      <span className="font-medium">{on ? "On" : "Off"}</span>
+      {sourceLabel(copy, id)}
+      {meta.optional ? <span className="text-xs text-muted">{copy.optional}</span> : null}
+      <span className="font-medium">{on ? copy.on : copy.off}</span>
     </button>
   );
 }
@@ -766,12 +777,12 @@ function SiteLogo({ url }: { url: string }) {
   );
 }
 
-function Definitions({ items }: { items: WordDefinition[] }) {
+function Definitions({ items, copy }: { items: WordDefinition[]; copy: UiCopy }) {
   if (!items.length) return null;
   return (
     <section aria-labelledby="word-definitions" className="rounded-3xl border border-line bg-surface p-4">
       <h2 id="word-definitions" className="font-display text-xl">
-        Definitions
+        {copy.definitions}
       </h2>
       <div className="mt-3 grid gap-4">
         {items.map((item) => (
@@ -802,17 +813,19 @@ function Definitions({ items }: { items: WordDefinition[] }) {
 function DeepDive({
   topic,
   items,
+  copy,
   onPick,
 }: {
   topic: string;
   items: string[];
+  copy: UiCopy;
   onPick: (query: string) => void;
 }) {
   if (!items.length) return null;
   const needle = topic.trim().toLowerCase();
   return (
     <div>
-      <h3 className="font-display text-xl text-ink">Deep dive into {topic}</h3>
+      <h3 className="font-display text-xl text-ink">{fill(copy.deepDive, { topic })}</h3>
       <ul className="mt-3 grid gap-2 sm:grid-cols-2">
         {items.map((item) => {
           const at = needle && item.toLowerCase().startsWith(needle) ? needle.length : -1;
@@ -845,6 +858,22 @@ function DeepDive({
   );
 }
 
+function SearchedAs({ lang, text }: { lang?: string; text: string }) {
+  const label =
+    lang === "zh-CN"
+      ? "网页和维基百科按此搜索"
+      : lang === "hi-IN"
+        ? "वेब और विकिपीडिया में इस रूप में खोजा गया"
+        : lang === "bn-BD"
+          ? "ওয়েব ও উইকিপিডিয়ায় এইভাবে খোঁজা হয়েছে"
+          : "Web and Wikipedia were searched as";
+  return (
+    <p className="mt-1 text-sm text-muted">
+      {label}: {text}
+    </p>
+  );
+}
+
 function Results({
   query,
   data,
@@ -854,6 +883,9 @@ function Results({
   onPage,
   onDive,
   aiModel,
+  lang,
+  onLang,
+  copy,
 }: {
   query: string;
   data: SearchPayload | null;
@@ -863,6 +895,9 @@ function Results({
   onPage: (source: SourceId, page: number) => void;
   onDive: (query: string) => void;
   aiModel: string | undefined;
+  lang: ReadLang;
+  onLang: (lang: ReadLang) => void;
+  copy: UiCopy;
 }) {
   const blocks: SourceId[] = (["web", "wiki", "grok", "images"] as const).filter((key) => sources[key] && data);
   const visible = blocks.map((key) => ({
@@ -882,7 +917,7 @@ function Results({
     setOpenId(null);
   }, [query, data]);
 
-  const aiCard = <AiAnswerCard query={query} data={data} loading={loading} sources={sources} aiModel={aiModel} />;
+  const aiCard = <AiAnswerCard query={query} data={data} loading={loading} sources={sources} aiModel={aiModel} copy={copy} lang={lang} />;
 
   if (!data) {
     return (
@@ -895,12 +930,15 @@ function Results({
   }
 
   const anyHits = visible.some((block) => block.hits.length > 0);
-  const enabled = blocks.map((key) => SOURCE_META[key].label).join(" · ");
+  const enabled = blocks.map((key) => sourceLabel(copy, key)).join(" · ");
 
   return (
     <div className={loading ? "opacity-70" : undefined}>
       <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
-        <h1 className="font-display text-4xl text-ink sm:text-5xl">{query}</h1>
+        <div>
+          <h1 className="font-display text-4xl text-ink sm:text-5xl">{query}</h1>
+          {data.searched ? <SearchedAs lang={data.lang} text={data.searched} /> : null}
+        </div>
         <div className="flex items-center gap-2">
           <p className="text-sm text-muted tabular-nums" aria-live="polite">
             {enabled} · {formatTook(data.tookMs)}
@@ -909,7 +947,7 @@ function Results({
             title={`${query} — Folio`}
             text={`Search results for “${query}” on Folio`}
             url={() => window.location.href}
-            label="Share these results"
+            label={copy.shareResults}
           />
         </div>
       </div>
@@ -919,10 +957,10 @@ function Results({
       <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-10 lg:grid-cols-[minmax(0,1fr)_20rem]">
         <div className="order-2 grid gap-10 lg:order-1">
           {!anyHits && !loading ? (
-            <p className="text-muted">Nothing matched. Try fewer words, or switch on another source.</p>
+            <p className="text-muted">{copy.nothing}</p>
           ) : null}
           {visible.map((block) => {
-            const count = resultCount(block.total, block.key);
+            const count = resultCount(block.total, block.key, copy);
             const last = lastPage(
               block.key === "web" || block.key === "images" ? undefined : block.total,
               block.page,
@@ -935,19 +973,19 @@ function Results({
               <section key={block.key} aria-labelledby={`source-${block.key}`} className="grid gap-3">
                 <div className="border-b border-line pb-2">
                   <h2 id={`source-${block.key}`} className="font-display text-2xl">
-                    {SOURCE_META[block.key].label}
+                    {sourceLabel(copy, block.key)}
                   </h2>
                   <p className="mt-1 text-sm text-muted">
-                    Search for <span className="text-ink">“{query}”</span>
+                    {copy.searchFor} <span className="text-ink">“{query}”</span>
                     {count ? ` — ${count}` : ""}
                   </p>
                 </div>
                 {block.error ? (
-                  <p className="text-sm text-muted">{SOURCE_META[block.key].label} didn’t respond. The other sources still ran.</p>
+                  <p className="text-sm text-muted">{fill(copy.noResponse, { source: sourceLabel(copy, block.key) })}</p>
                 ) : null}
                 {!block.error && block.hits.length === 0 ? (
                   <p className="text-sm text-muted">
-                    {block.page > 1 ? "Nothing on this page." : `No matches in ${SOURCE_META[block.key].label}.`}
+                    {block.page > 1 ? copy.nothingPage : fill(copy.noMatches, { source: sourceLabel(copy, block.key) })}
                   </p>
                 ) : null}
                 {block.key === "images" ? (
@@ -988,7 +1026,7 @@ function Results({
                               href={hit.url}
                               target="_blank"
                               rel="noreferrer"
-                              aria-label={`Open ${hit.title} in a new tab`}
+                              aria-label={fill(copy.openNew, { title: hit.title })}
                               className="mt-3 grid size-11 shrink-0 place-items-center rounded-full text-muted hover:text-accent"
                             >
                               <ArrowUpRight className="size-4" aria-hidden="true" />
@@ -997,7 +1035,7 @@ function Results({
                         </li>
                         {block.key === "web" && index === 0 && block.page === 1 && data.deepDive.length > 0 ? (
                           <li className="border-b border-line py-4">
-                            <DeepDive topic={query} items={data.deepDive} onPick={onDive} />
+                            <DeepDive topic={query} items={data.deepDive} copy={copy} onPick={onDive} />
                           </li>
                         ) : null}
                       </Fragment>
@@ -1005,26 +1043,29 @@ function Results({
                   </ul>
                 )}
                 <Pager
-                  label={SOURCE_META[block.key].label}
+                  label={sourceLabel(copy, block.key)}
                   page={block.page}
                   last={last}
                   disabled={loading || Boolean(block.error)}
+                  previous={copy.previous}
+                  next={copy.next}
+                  pageLabel={copy.page}
                   onPage={(page) => onPage(block.key, page)}
                 />
                 {block.key === "web" && block.hits.length > 0 ? (
-                  <p className="text-xs text-muted">Web listings via Bing’s public results feed.</p>
+                  <p className="text-xs text-muted">{copy.webNote}</p>
                 ) : null}
                 {block.key === "images" && block.hits.length > 0 ? (
-                  <p className="text-xs text-muted">Images via Bing’s public image results, with SafeSearch set to moderate.</p>
+                  <p className="text-xs text-muted">{copy.imagesNote}</p>
                 ) : null}
               </section>
             );
           })}
         </div>
         <div className="order-1 grid gap-4 lg:order-2">
-          {data.card ? <Lead card={data.card} /> : null}
-          <PlaceList places={data.places} error={data.placesError} />
-          <Definitions items={data.definitions} />
+          {data.card ? <Lead card={data.card} copy={copy} /> : null}
+          <PlaceList places={data.places} error={data.placesError} copy={copy} />
+          <Definitions items={data.definitions} copy={copy} />
           {!data.card && !data.places.length && loading ? <Skeleton /> : null}
         </div>
       </div>
@@ -1033,6 +1074,8 @@ function Results({
           hit={openHit}
           index={openIndex}
           total={flat.length}
+          lang={lang}
+          onLang={onLang}
           onClose={() => setOpenId(null)}
           onPrev={() => {
             const prev = flat[openIndex - 1];
@@ -1073,12 +1116,16 @@ function AiAnswerCard({
   loading,
   sources,
   aiModel,
+  copy,
+  lang,
 }: {
   query: string;
   data: SearchPayload | null;
   loading: boolean;
   sources: Sources;
   aiModel: string | undefined;
+  copy: UiCopy;
+  lang: ReadLang;
 }) {
   const [providers, setProviders] = useState<AiModelStatus[] | "failed" | null>(null);
   const [state, setState] = useState<AiState | null>(null);
@@ -1103,7 +1150,7 @@ function AiAnswerCard({
   // Nothing is asked until the list loads. If the list fails, the server still picks and falls back.
   const selected = Array.isArray(providers) ? selectedAiModel(aiModel, available) : aiModel;
   const normalized = query.replace(/\s+/g, " ");
-  const key = JSON.stringify([normalized, sources.web, sources.wiki, sources.grok, sources.images, selected ?? ""]);
+  const key = JSON.stringify([normalized, sources.web, sources.wiki, sources.grok, sources.images, selected ?? "", lang]);
   const ready = providers !== null && Boolean(data) && !loading && data?.query === normalized;
 
   useEffect(() => {
@@ -1126,7 +1173,7 @@ function AiAnswerCard({
       return;
     }
     setState({ key, answer: null });
-    answerWithAi({ data: { q: data.query, context, model: selected } })
+    answerWithAi({ data: { q: data.query, context, model: selected, lang } })
       .then((answer) => setState((current) => (current?.key === key ? { key, answer } : current)))
       .catch(() =>
         setState((current) =>
@@ -1148,19 +1195,17 @@ function AiAnswerCard({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 id="ai-answer" className="flex items-center gap-2 font-display text-xl text-ink">
           <Sparkles className="size-4 text-accent" aria-hidden="true" />
-          AI answer
+          {copy.aiAnswer}
         </h2>
         <p className="rounded-full bg-accent-soft px-2.5 py-1 text-xs font-medium text-accent">
-          AI-generated · can be wrong
+          {copy.aiBadge}
         </p>
       </div>
       <div aria-live="polite">
         {pending ? (
           <div className="mt-3">
             <p className="text-sm text-muted">
-              {selected
-                ? `Asking ${modelLabel(selected)} for a short answer from the top results…`
-                : "Writing a short answer from the top results…"}
+              {selected ? fill(copy.asking, { model: modelLabel(selected) }) : copy.writing}
             </p>
             <div className="mt-3 grid gap-2" aria-hidden="true">
               <div className="h-3.5 w-full animate-pulse rounded bg-line" />
@@ -1189,8 +1234,8 @@ function AiAnswerCard({
                       <SiteLogo url={cite.url} />
                       <span className="min-w-0 truncate">{cite.title}</span>
                       <span className="hidden shrink-0 text-xs text-muted sm:inline">
-                        {cite.source === "images" ? "Image · " : ""}
-                        {siteHost(cite.url) || SOURCE_META[cite.source].label}
+                        {cite.source === "images" ? `${copy.image} · ` : ""}
+                        {siteHost(cite.url) || sourceLabel(copy, cite.source)}
                       </span>
                     </a>
                   </li>
@@ -1200,17 +1245,20 @@ function AiAnswerCard({
             <p className="mt-3 text-xs leading-relaxed text-muted">
               {answer.failed.length > 0 ? (
                 <>
-                  {answer.failed.map(aiProviderLabel).join(" and ")} didn’t answer, so {aiProviderLabel(answer.provider)}{" "}
-                  did.{" "}
+                  {fill(copy.failedSo, {
+                    failed: answer.failed.map(aiProviderLabel).join(", "),
+                    provider: aiProviderLabel(answer.provider),
+                  })}{" "}
                 </>
               ) : null}
-              Written by <span className="font-medium text-ink">{aiProviderLabel(answer.provider)}</span> ({answer.model})
-              from the results on this page. It can be wrong or leave things out, so check the sources.
+              {fill(copy.writtenBy, { provider: aiProviderLabel(answer.provider), model: answer.model })}
             </p>
           </>
         ) : (
           <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-            <p className="text-sm text-muted">{answer.message}</p>
+            <p className="text-sm text-muted">
+              {answer.status === "unconfigured" ? copy.aiUnconfigured : answer.status === "no-context" ? copy.aiNoContext : copy.aiError}
+            </p>
             {answer.status === "error" ? (
               <button
                 type="button"
@@ -1218,7 +1266,7 @@ function AiAnswerCard({
                 className="inline-flex min-h-11 items-center gap-1.5 rounded-full border border-line px-3 text-sm text-ink transition-transform duration-150 ease-out active:scale-[0.96]"
               >
                 <RotateCw className="size-3.5" aria-hidden="true" />
-                Try again
+                {copy.tryAgain}
               </button>
             ) : null}
           </div>
@@ -1238,12 +1286,14 @@ function AiModelPicker({
   selected,
   onPick,
   compact = false,
+  copy,
   onOpenChange,
 }: {
   models: AiModelStatus[] | "failed" | null;
   selected: string | undefined;
   onPick: (id: string) => void;
   compact?: boolean;
+  copy: UiCopy;
   onOpenChange?: (open: boolean) => void;
 }) {
   const [open, setOpenState] = useState(false);
@@ -1282,7 +1332,7 @@ function AiModelPicker({
         type="button"
         aria-haspopup="listbox"
         aria-expanded={open}
-        aria-label="AI model"
+        aria-label={copy.model}
         disabled={models === null}
         onMouseDown={(event) => event.stopPropagation()}
         onClick={() => setOpen(!open)}
@@ -1292,13 +1342,13 @@ function AiModelPicker({
             : "inline-flex min-h-11 items-center gap-2 rounded-full border border-line bg-bg px-3 text-sm text-ink transition-transform duration-150 ease-out active:scale-[0.96] disabled:opacity-60"
         }
       >
-        <span className="truncate">{current?.label ?? "Model"}</span>
+        <span className="truncate">{current?.label ?? copy.model}</span>
         <ChevronDown className={`size-3.5 shrink-0 text-muted transition-transform ${open ? "rotate-180" : ""}`} aria-hidden="true" />
       </button>
       {open ? (
         <div className="absolute top-full right-0 z-40 mt-2 w-72 max-w-[calc(100vw-2rem)] rounded-2xl border border-line bg-surface p-2 shadow-lg">
           <label className="sr-only" htmlFor="ai-model-filter">
-            Search models
+            {copy.searchModels}
           </label>
           <input
             id="ai-model-filter"
@@ -1455,10 +1505,567 @@ function PeekImage({ image, title }: { image: NonNullable<SearchHit["image"]>; t
   );
 }
 
+const READ_LANGS = [
+  { lang: "en-US", label: "English" },
+  { lang: "bn-BD", label: "বাংলা" },
+  { lang: "zh-CN", label: "简体中文" },
+  { lang: "hi-IN", label: "हिन्दी" },
+] as const;
+
+type ReadLang = (typeof READ_LANGS)[number]["lang"];
+
+const PEEK_COPY: Record<
+  ReadLang,
+  {
+    listen: string;
+    pause: string;
+    resume: string;
+    stop: string;
+    closePlayer: string;
+    close: string;
+    previous: string;
+    next: string;
+    openPage: string;
+    fullImage: string;
+    loading: string;
+    translating: string;
+    failed: string;
+    noVoice: string;
+    languages: string;
+    controls: string;
+    share: string;
+    contents: string;
+    voices: string;
+  }
+> = {
+  "en-US": {
+    listen: "Listen",
+    pause: "Pause",
+    resume: "Resume",
+    stop: "Stop reading",
+    closePlayer: "Close player",
+    close: "Close",
+    previous: "Previous result",
+    next: "Next result",
+    openPage: "Open page",
+    fullImage: "View full-size image",
+    loading: "Loading the full preview…",
+    translating: "Translating…",
+    failed: "Translation didn’t load. The original text is still shown.",
+    noVoice: "This browser has no English voice installed, so the reading may use another voice.",
+    languages: "Reading language",
+    controls: "Reading controls",
+    share: "Share this page",
+    contents: "Contents",
+    voices: "Voices",
+  },
+  "zh-CN": {
+    listen: "朗读",
+    pause: "暂停",
+    resume: "继续",
+    stop: "停止朗读",
+    closePlayer: "关闭播放器",
+    close: "关闭",
+    previous: "上一条",
+    next: "下一条",
+    openPage: "打开页面",
+    fullImage: "查看大图",
+    loading: "正在加载完整预览…",
+    translating: "正在翻译…",
+    failed: "翻译没有加载。仍显示原文。",
+    noVoice: "此浏览器未安装中文语音，朗读可能会使用其他语音。",
+    languages: "朗读语言",
+    controls: "朗读控制",
+    share: "分享此页",
+    contents: "目录",
+    voices: "语音",
+  },
+  "hi-IN": {
+    listen: "सुनें",
+    pause: "रोकें",
+    resume: "फिर चलाएँ",
+    stop: "पढ़ना बंद करें",
+    closePlayer: "प्लेयर बंद करें",
+    close: "बंद करें",
+    previous: "पिछला परिणाम",
+    next: "अगला परिणाम",
+    openPage: "पृष्ठ खोलें",
+    fullImage: "पूरा चित्र देखें",
+    loading: "पूरा पूर्वावलोकन लोड हो रहा है…",
+    translating: "अनुवाद हो रहा है…",
+    failed: "अनुवाद लोड नहीं हुआ। मूल पाठ अभी भी दिख रहा है।",
+    noVoice: "इस ब्राउज़र में हिन्दी की आवाज़ नहीं है, इसलिए कोई और आवाज़ चल सकती है।",
+    languages: "पढ़ने की भाषा",
+    controls: "पढ़ने के नियंत्रण",
+    share: "यह पृष्ठ साझा करें",
+    contents: "विषय सूची",
+    voices: "आवाज़ें",
+  },
+  "bn-BD": {
+    listen: "শুনুন",
+    pause: "বিরতি",
+    resume: "আবার চালান",
+    stop: "পড়া বন্ধ",
+    closePlayer: "প্লেয়ার বন্ধ",
+    close: "বন্ধ",
+    previous: "আগের ফল",
+    next: "পরের ফল",
+    openPage: "পাতা খুলুন",
+    fullImage: "পূর্ণ ছবি দেখুন",
+    loading: "পূর্ণ প্রিভিউ লোড হচ্ছে…",
+    translating: "অনুবাদ হচ্ছে…",
+    failed: "অনুবাদ লোড হয়নি। আসল লেখা এখনও দেখা যাচ্ছে।",
+    noVoice: "এই ব্রাউজারে বাংলা কণ্ঠ নেই, তাই অন্য কণ্ঠ ব্যবহার হতে পারে।",
+    languages: "পড়ার ভাষা",
+    controls: "পড়ার নিয়ন্ত্রণ",
+    share: "এই পাতা শেয়ার করুন",
+    contents: "সূচি",
+    voices: "কণ্ঠ",
+  },
+};
+
+const READ_LANG_KEY = "folio-read-lang";
+
+function readStoredLang(): ReadLang {
+  if (typeof window === "undefined") return "en-US";
+  try {
+    const saved = localStorage.getItem(READ_LANG_KEY) ?? sessionStorage.getItem(READ_LANG_KEY);
+    if (READ_LANGS.some((item) => item.lang === saved)) {
+      const lang = saved as ReadLang;
+      if (localStorage.getItem(READ_LANG_KEY) !== lang) localStorage.setItem(READ_LANG_KEY, lang);
+      document.cookie = `folio_lang=${encodeURIComponent(lang)}; Path=/; Max-Age=31536000; SameSite=Lax`;
+      return lang;
+    }
+  } catch {
+    /* ignore */
+  }
+  return "en-US";
+}
+
+function storeReadLang(lang: ReadLang) {
+  try {
+    localStorage.setItem(READ_LANG_KEY, lang);
+  } catch {
+    /* ignore */
+  }
+  document.cookie = `folio_lang=${encodeURIComponent(lang)}; Path=/; Max-Age=31536000; SameSite=Lax`;
+}
+
+function LanguagePreference({ lang, onChange }: { lang: ReadLang; onChange: (lang: ReadLang) => void }) {
+  const [open, setOpen] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  const current = READ_LANGS.find((item) => item.lang === lang) ?? READ_LANGS[0];
+
+  useEffect(() => {
+    if (!open) return;
+    function onPointer(event: MouseEvent) {
+      if (!root.current?.contains(event.target as Node)) setOpen(false);
+    }
+    function onKey(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("mousedown", onPointer);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onPointer);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  return (
+    <div ref={root} className="relative">
+      <button
+        type="button"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label={UI[lang].language}
+        onClick={() => setOpen((value) => !value)}
+        className="inline-flex min-h-11 items-center gap-2 rounded-full border border-line bg-surface px-4 text-sm text-ink transition-transform duration-150 ease-out active:scale-[0.96]"
+      >
+        {current.label}
+        <ChevronDown className={`size-4 text-muted transition-transform ${open ? "rotate-180" : ""}`} aria-hidden="true" />
+      </button>
+      {open ? (
+        <div role="listbox" aria-label={UI[lang].language} className="absolute right-0 z-40 mt-2 min-w-full overflow-hidden rounded-2xl border border-line bg-surface py-1 shadow-lg">
+          {READ_LANGS.map((item) => (
+            <button
+              key={item.lang}
+              type="button"
+              role="option"
+              aria-selected={item.lang === lang}
+              onClick={() => {
+                onChange(item.lang);
+                setOpen(false);
+              }}
+              className={`flex min-h-11 w-full items-center px-4 text-left text-sm text-ink ${
+                item.lang === lang ? "bg-accent-soft" : ""
+              }`}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+const READ_RATES = [0.8, 1, 1.25, 1.5];
+
+function chunkSpeech(text: string): string[] {
+  const clean = text.replace(/\s+/g, " ").trim();
+  if (!clean) return [];
+  const parts: string[] = [];
+  let buf = "";
+  for (const sentence of clean.split(/(?<=[.!?।。！？])\s+/)) {
+    const next = buf ? `${buf} ${sentence}` : sentence;
+    if (next.length > 220 && buf) {
+      parts.push(buf);
+      buf = sentence;
+    } else {
+      buf = next;
+    }
+  }
+  if (buf) parts.push(buf);
+  return parts;
+}
+
+function matchVoice(voices: SpeechSynthesisVoice[], lang: string): SpeechSynthesisVoice | undefined {
+  const exact = lang.toLowerCase();
+  const prefix = exact.slice(0, 2);
+  return voices.find((voice) => voice.lang.toLowerCase() === exact) ?? voices.find((voice) => voice.lang.toLowerCase().startsWith(prefix));
+}
+
+const VOICE_KEY = "folio-read-voice";
+
+function voicesFor(voices: SpeechSynthesisVoice[], lang: string): SpeechSynthesisVoice[] {
+  const exact = lang.toLowerCase();
+  const prefix = exact.slice(0, 2);
+  const same = voices.filter((voice) => voice.lang.toLowerCase() === exact);
+  if (same.length) return same;
+  return voices.filter((voice) => voice.lang.toLowerCase().startsWith(prefix));
+}
+
+function readVoiceMap(): Record<string, string> {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = localStorage.getItem(VOICE_KEY);
+    const parsed = raw ? (JSON.parse(raw) as unknown) : {};
+    if (typeof parsed !== "object" || parsed === null) return {};
+    return parsed as Record<string, string>;
+  } catch {
+    return {};
+  }
+}
+
+function storeVoice(lang: string, uri: string) {
+  try {
+    const map = readVoiceMap();
+    map[lang] = uri;
+    localStorage.setItem(VOICE_KEY, JSON.stringify(map));
+  } catch {
+    /* ignore */
+  }
+}
+
+function pickVoice(voices: SpeechSynthesisVoice[], lang: string, uri: string): SpeechSynthesisVoice | undefined {
+  const options = voicesFor(voices, lang);
+  return options.find((voice) => voice.voiceURI === uri) ?? options[0] ?? matchVoice(voices, lang);
+}
+
+function ReadAloud({
+  text,
+  resetKey,
+  lang,
+  ready,
+  copy,
+  onLang,
+}: {
+  text: string;
+  resetKey: string;
+  lang: ReadLang;
+  ready: boolean;
+  copy: (typeof PEEK_COPY)["en-US"];
+  onLang: (lang: ReadLang) => void;
+}) {
+  const [rate, setRate] = useState(1);
+  const [state, setState] = useState<"idle" | "playing" | "paused">("idle");
+  const [open, setOpen] = useState(false);
+  const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
+  const [voiceUri, setVoiceUri] = useState("");
+  const [voiceOpen, setVoiceOpen] = useState(false);
+  const [voiceBox, setVoiceBox] = useState<{ left: number; top: number } | null>(null);
+  const generation = useRef(0);
+  const pending = useRef<ReadLang | null>(null);
+  const voiceMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const synth = window.speechSynthesis;
+    if (!synth) return;
+    const load = () => setVoices(synth.getVoices());
+    load();
+    synth.addEventListener("voiceschanged", load);
+    return () => {
+      generation.current += 1;
+      synth.cancel();
+      synth.removeEventListener("voiceschanged", load);
+    };
+  }, []);
+
+  useEffect(() => {
+    generation.current += 1;
+    pending.current = null;
+    window.speechSynthesis?.cancel();
+    setState("idle");
+  }, [resetKey]);
+
+  useEffect(() => {
+    const options = voicesFor(voices, lang);
+    const saved = readVoiceMap()[lang];
+    setVoiceUri(options.find((voice) => voice.voiceURI === saved)?.voiceURI ?? options[0]?.voiceURI ?? "");
+    setVoiceOpen(false);
+  }, [voices, lang]);
+
+  useEffect(() => {
+    if (!voiceOpen) return;
+    function onPointer(event: MouseEvent) {
+      if (!voiceMenuRef.current?.contains(event.target as Node)) setVoiceOpen(false);
+    }
+    document.addEventListener("mousedown", onPointer);
+    return () => document.removeEventListener("mousedown", onPointer);
+  }, [voiceOpen]);
+
+  function play(nextLang: ReadLang, nextRate = rate, spoken = text, uri = voiceUri) {
+    const synth = window.speechSynthesis;
+    const parts = chunkSpeech(spoken);
+    if (!synth || parts.length === 0) return;
+    const token = ++generation.current;
+    synth.cancel();
+    const voice = pickVoice(synth.getVoices(), nextLang, uri);
+    parts.forEach((part, index) => {
+      const utter = new SpeechSynthesisUtterance(part);
+      utter.lang = nextLang;
+      utter.rate = nextRate;
+      if (voice) utter.voice = voice;
+      const finish = () => {
+        if (generation.current !== token) return;
+        if (index === parts.length - 1) setState("idle");
+      };
+      utter.onend = finish;
+      utter.onerror = finish;
+      synth.speak(utter);
+    });
+    setRate(nextRate);
+    setState("playing");
+    setOpen(true);
+  }
+
+  useEffect(() => {
+    if (pending.current !== lang || !ready) return;
+    pending.current = null;
+    play(lang);
+    // play closes over the text for this language once the translation is ready
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lang, ready, text]);
+
+  function choose(next: ReadLang) {
+    pending.current = next;
+    onLang(next);
+    if (next === lang && ready) {
+      pending.current = null;
+      play(next);
+    }
+  }
+
+  function stop() {
+    generation.current += 1;
+    pending.current = null;
+    window.speechSynthesis?.cancel();
+    setState("idle");
+  }
+
+  function togglePause() {
+    const synth = window.speechSynthesis;
+    if (!synth) return;
+    if (state === "playing") {
+      synth.pause();
+      setState("paused");
+    } else if (state === "paused") {
+      synth.resume();
+      setState("playing");
+    }
+  }
+
+  function chooseVoice(uri: string) {
+    setVoiceUri(uri);
+    storeVoice(lang, uri);
+    setVoiceOpen(false);
+    if (state !== "idle") play(lang, rate, text, uri);
+  }
+
+  const options = voicesFor(voices, lang);
+  const missing = voices.length > 0 && options.length === 0;
+  const current = READ_LANGS.find((item) => item.lang === lang);
+
+  return (
+    <div className="mt-3">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+        className="inline-flex min-h-11 items-center gap-2 rounded-full border border-line px-3 text-sm text-ink transition-transform duration-150 ease-out active:scale-[0.96]"
+      >
+        <Volume2 className="size-4" aria-hidden="true" />
+        {copy.listen}
+      </button>
+      {open ? (
+        <div className="mt-2 grid gap-2">
+          <div className="flex flex-wrap gap-1.5" role="group" aria-label={copy.languages}>
+            {READ_LANGS.map((item) => (
+              <button
+                key={item.lang}
+                type="button"
+                aria-pressed={lang === item.lang}
+                onClick={() => choose(item.lang)}
+                className={`inline-flex min-h-11 items-center rounded-full border px-3 text-sm transition-transform duration-150 ease-out active:scale-[0.96] ${
+                  lang === item.lang ? "border-accent bg-accent-soft text-ink" : "border-line bg-surface text-ink"
+                }`}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+          {state !== "idle" ? (
+            <div className="relative flex items-center gap-1 rounded-full border border-line bg-bg px-1 py-1" role="group" aria-label={copy.controls}>
+              <button type="button" onClick={togglePause} aria-label={state === "paused" ? copy.resume : copy.pause} className="grid size-11 place-items-center rounded-full text-ink">
+                {state === "paused" ? <Play className="size-4" aria-hidden="true" /> : <Pause className="size-4" aria-hidden="true" />}
+              </button>
+              <button type="button" onClick={stop} aria-label={copy.stop} className="grid size-11 place-items-center rounded-full text-ink">
+                <Square className="size-3.5 fill-current" aria-hidden="true" />
+              </button>
+              <div ref={voiceMenuRef} className="relative">
+                <button
+                  type="button"
+                  aria-label={copy.voices}
+                  aria-expanded={voiceOpen}
+                  aria-haspopup="listbox"
+                  disabled={options.length === 0}
+                  onClick={(event) => {
+                    if (voiceOpen) {
+                      setVoiceOpen(false);
+                      return;
+                    }
+                    const rect = event.currentTarget.getBoundingClientRect();
+                    setVoiceBox({ left: rect.left, top: rect.bottom + 8 });
+                    setVoiceOpen(true);
+                  }}
+                  className="grid size-11 place-items-center rounded-full text-ink disabled:opacity-40"
+                >
+                  <span className={`size-3.5 rounded-full border-2 ${voiceUri ? "border-ink bg-ink" : "border-muted"}`} />
+                </button>
+                {voiceOpen && voiceBox && options.length > 0 ? (
+                  <div
+                    role="listbox"
+                    aria-label={copy.voices}
+                    style={{ left: voiceBox.left, top: voiceBox.top }}
+                    className="fixed z-50 w-48 overflow-hidden rounded-2xl border border-line bg-surface py-1 shadow-lg"
+                  >
+                    {options.map((voice) => {
+                      const selected = voice.voiceURI === voiceUri;
+                      return (
+                        <button
+                          key={voice.voiceURI}
+                          type="button"
+                          role="option"
+                          aria-selected={selected}
+                          onClick={() => chooseVoice(voice.voiceURI)}
+                          className="flex min-h-11 w-full items-center gap-3 px-3 text-left text-sm text-ink"
+                        >
+                          <span className={`size-3 shrink-0 rounded-full border-2 ${selected ? "border-ink bg-ink" : "border-muted"}`} />
+                          <span className="truncate">{voice.name}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : null}
+              </div>
+              <span className="min-w-0 flex-1 truncate px-1 text-xs text-muted">{current?.label}</span>
+              <button
+                type="button"
+                onClick={() => {
+                  const next = READ_RATES[(READ_RATES.indexOf(rate) + 1) % READ_RATES.length] ?? 1;
+                  play(lang, next);
+                }}
+                className="inline-flex h-11 min-w-11 items-center justify-center rounded-full px-2 text-xs tabular-nums text-ink"
+              >
+                {rate}x
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  stop();
+                  setOpen(false);
+                }}
+                aria-label={copy.closePlayer}
+                className="grid size-11 place-items-center rounded-full text-ink"
+              >
+                <X className="size-4" aria-hidden="true" />
+              </button>
+            </div>
+          ) : null}
+          {missing ? <p className="text-xs text-muted">{copy.noVoice}</p> : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function packPreview(lead: string, sections: PreviewSection[]): string {
+  const chunks = [lead.trim()];
+  for (const section of sections) {
+    const marks = "#".repeat(section.level + 1);
+    chunks.push(`${marks} ${section.title}${section.text ? `\n${section.text}` : ""}`);
+  }
+  return chunks.filter(Boolean).join("\n\n");
+}
+
+function unpackPreview(text: string): { lead: string; sections: PreviewSection[] } {
+  const sections: PreviewSection[] = [];
+  const lead: string[] = [];
+  let current: { title: string; level: number; lines: string[] } | null = null;
+  const push = () => {
+    if (!current) return;
+    const title = current.title.trim();
+    if (title) {
+      sections.push({
+        id: `s-${sections.length}`,
+        title,
+        level: current.level,
+        text: current.lines.join(" ").replace(/\s+/g, " ").trim(),
+      });
+    }
+    current = null;
+  };
+  for (const line of text.split(/\n/)) {
+    const match = /^(#{2,3})\s+(.+?)\s*$/.exec(line);
+    if (match) {
+      push();
+      current = { title: match[2] ?? "", level: (match[1] ?? "##").length - 1, lines: [] };
+      continue;
+    }
+    if (current) current.lines.push(line);
+    else lead.push(line);
+  }
+  push();
+  return { lead: lead.join("\n").replace(/\n{3,}/g, "\n\n").trim(), sections };
+}
+
 function ResultPeek({
   hit,
   index,
   total,
+  lang,
+  onLang,
   onClose,
   onPrev,
   onNext,
@@ -1466,13 +2073,21 @@ function ResultPeek({
   hit: SearchHit;
   index: number;
   total: number;
+  lang: ReadLang;
+  onLang: (lang: ReadLang) => void;
   onClose: () => void;
   onPrev: () => void;
   onNext: () => void;
 }) {
   const closeRef = useRef<HTMLButtonElement>(null);
+  const scrollerRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
   const [preview, setPreview] = useState<HitPreview | null>(null);
+  const [previewReady, setPreviewReady] = useState(hit.source === "web" || hit.source === "images");
+  const [translation, setTranslation] = useState<{ title: string; text: string } | null>(null);
+  const [translating, setTranslating] = useState(false);
+  const [translateError, setTranslateError] = useState(false);
+  const [activeSection, setActiveSection] = useState("s-0");
 
   useEffect(() => {
     closeRef.current?.focus();
@@ -1481,13 +2096,18 @@ function ResultPeek({
   useEffect(() => {
     let cancelled = false;
     setPreview(null);
-    if (hit.source === "web" || hit.source === "images") return;
+    const immediate = hit.source === "web" || hit.source === "images";
+    setPreviewReady(immediate);
+    if (immediate) return;
     previewHit({ data: { source: hit.source, title: hit.title, url: hit.url, snippet: hit.snippet } })
       .then((row) => {
         if (!cancelled) setPreview(row);
       })
       .catch(() => {
         if (!cancelled) setPreview(null);
+      })
+      .finally(() => {
+        if (!cancelled) setPreviewReady(true);
       });
     return () => {
       cancelled = true;
@@ -1515,17 +2135,63 @@ function ResultPeek({
   }, [onClose, onPrev, onNext]);
 
   const extract = preview?.extract || hit.snippet;
-  const paragraphs = extract.split(/\n\n+/).map((part) => part.trim()).filter(Boolean);
+  const sourceSections = preview?.sections ?? [];
+  const sourceBody = packPreview(extract, sourceSections);
+  const sourceTitle = preview?.title || hit.title;
+  const copy = PEEK_COPY[lang];
+  const translated = lang !== "en-US" && translation && !translateError ? translation : null;
+  const unpacked = translated ? unpackPreview(translated.text) : null;
+  const shownTitle = translated?.title || sourceTitle;
+  const shownLead = unpacked ? unpacked.lead : extract;
+  const shownSections = unpacked?.sections.length ? unpacked.sections : translated ? [] : sourceSections;
+  const shownText = [shownLead, ...shownSections.map((section) => `${section.title}. ${section.text}`)].filter(Boolean).join("\n\n");
+  const leadParagraphs = shownLead.split(/\n\n+/).map((part) => part.trim()).filter(Boolean);
   const pageUrl = preview?.url || hit.url;
   const videoId = youtubeId(pageUrl);
+  const speakReady = lang === "en-US" || translateError || Boolean(translated && !translating);
+
+  useEffect(() => {
+    setActiveSection(shownSections[0]?.id ?? "s-0");
+  }, [hit.id, lang, shownSections[0]?.id]);
+
+  useEffect(() => {
+    if (lang === "en-US" || !previewReady) return;
+    let cancelled = false;
+    setTranslating(true);
+    setTranslateError(false);
+    translatePreview({ data: { lang, title: sourceTitle, text: sourceBody } })
+      .then((row) => {
+        if (!cancelled) setTranslation(row);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setTranslation(null);
+          setTranslateError(true);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setTranslating(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [lang, previewReady, hit.id, sourceTitle, sourceBody]);
+
+  function chooseLang(next: ReadLang) {
+    onLang(next);
+    setTranslation(null);
+    setTranslateError(false);
+    setTranslating(next !== "en-US");
+  }
 
   return (
     <div className="fixed inset-0 z-40">
-      <button type="button" aria-label="Close preview" onClick={onClose} className="absolute inset-0 bg-ink/35" />
+      <button type="button" aria-label={copy.close} onClick={onClose} className="absolute inset-0 bg-ink/35" />
       <aside
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
+        lang={lang}
         className="folio-peek absolute inset-x-0 bottom-0 flex max-h-[88vh] flex-col rounded-t-3xl border border-line bg-surface sm:inset-y-0 sm:right-0 sm:left-auto sm:max-h-none sm:w-[min(32rem,100%)] sm:rounded-none sm:border-y-0 sm:border-r-0"
       >
         <div className="px-4 pt-2 sm:pt-4">
@@ -1540,7 +2206,7 @@ function ResultPeek({
                 type="button"
                 onClick={onPrev}
                 disabled={index <= 0}
-                aria-label="Previous result"
+                aria-label={copy.previous}
                 className="grid size-11 place-items-center rounded-full text-ink disabled:opacity-40"
               >
                 <ChevronLeft className="size-4" aria-hidden="true" />
@@ -1552,7 +2218,7 @@ function ResultPeek({
                 type="button"
                 onClick={onNext}
                 disabled={index >= total - 1}
-                aria-label="Next result"
+                aria-label={copy.next}
                 className="grid size-11 place-items-center rounded-full text-ink disabled:opacity-40"
               >
                 <ChevronRight className="size-4" aria-hidden="true" />
@@ -1561,7 +2227,7 @@ function ResultPeek({
                 ref={closeRef}
                 type="button"
                 onClick={onClose}
-                aria-label="Close"
+                aria-label={copy.close}
                 className="grid size-11 place-items-center rounded-full text-ink"
               >
                 <X className="size-4" aria-hidden="true" />
@@ -1569,7 +2235,7 @@ function ResultPeek({
             </div>
           </div>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-6">
+        <div ref={scrollerRef} className="relative min-h-0 flex-1 overflow-y-auto px-5 pb-6">
           {hit.image ? (
             <PeekImage key={hit.id} image={hit.image} title={hit.title} />
           ) : videoId ? (
@@ -1588,16 +2254,69 @@ function ResultPeek({
             <img src={preview.image} alt="" className="mb-4 max-h-52 w-full rounded-xl object-cover" />
           ) : null}
           <h2 id={titleId} className="font-display text-3xl leading-tight">
-            {preview?.title || hit.title}
+            {shownTitle}
           </h2>
           <p className="mt-1 text-sm text-accent">{preview?.kicker || hit.meta}</p>
-          <div className="mt-4 grid gap-3">
-            {paragraphs.map((part, partIndex) => (
-              <p key={`${hit.id}-${partIndex}`} className="text-sm leading-relaxed text-ink">
-                {part}
-              </p>
-            ))}
-          </div>
+          <ReadAloud
+            resetKey={hit.id}
+            lang={lang}
+            ready={speakReady}
+            copy={copy}
+            text={[shownTitle, shownText].filter(Boolean).join(". ")}
+            onLang={chooseLang}
+          />
+          {translating ? <p className="mt-2 text-sm text-muted">{copy.translating}</p> : null}
+          {translateError ? <p className="mt-2 text-sm text-muted">{copy.failed}</p> : null}
+          {shownSections.length > 0 ? (
+            <div className="mt-4 sm:grid sm:grid-cols-[9.5rem_minmax(0,1fr)] sm:gap-4">
+              <nav aria-label={copy.contents} className="mb-4 sm:sticky sm:top-0 sm:mb-0 sm:max-h-[70vh] sm:overflow-y-auto">
+                <p className="text-xs tracking-widest text-muted uppercase">{copy.contents}</p>
+                <ol className="mt-2">
+                  {shownSections.map((section) => (
+                    <li key={section.id} className={section.level > 1 ? "pl-3" : ""}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActiveSection(section.id);
+                          const scroller = scrollerRef.current;
+                          const target = scroller?.querySelector<HTMLElement>(`#peek-${section.id}`);
+                          if (!scroller || !target) return;
+                          const top = target.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
+                          scroller.scrollTo({ top: Math.max(0, top - 8), behavior: "smooth" });
+                        }}
+                        className={`block w-full border-l-2 py-1.5 pl-2 text-left text-sm leading-snug ${
+                          activeSection === section.id ? "border-ink text-ink" : "border-transparent text-muted"
+                        }`}
+                      >
+                        {section.title}
+                      </button>
+                    </li>
+                  ))}
+                </ol>
+              </nav>
+              <div>
+                {leadParagraphs.map((part, partIndex) => (
+                  <p key={`${hit.id}-lead-${partIndex}`} className="mb-3 text-sm leading-relaxed text-ink">
+                    {part}
+                  </p>
+                ))}
+                {shownSections.map((section) => (
+                  <section key={section.id} id={`peek-${section.id}`} className="scroll-mt-2 pt-3">
+                    <h3 className={section.level > 1 ? "text-base font-medium text-ink" : "font-display text-xl text-ink"}>{section.title}</h3>
+                    {section.text ? <p className="mt-2 text-sm leading-relaxed text-ink">{section.text}</p> : null}
+                  </section>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="mt-4 grid gap-3">
+              {leadParagraphs.map((part, partIndex) => (
+                <p key={`${hit.id}-${partIndex}`} className="text-sm leading-relaxed text-ink">
+                  {part}
+                </p>
+              ))}
+            </div>
+          )}
           {hit.image ? (
             <a
               href={hit.image.full}
@@ -1605,24 +2324,24 @@ function ResultPeek({
               rel="noreferrer"
               className="mt-4 inline-flex min-h-11 items-center gap-1 text-sm font-medium text-ink hover:text-accent"
             >
-              View full-size image
+              {copy.fullImage}
               <ArrowUpRight className="size-4" aria-hidden="true" />
             </a>
           ) : null}
-          {!preview && hit.source !== "web" && hit.source !== "images" ? <p className="mt-4 text-sm text-muted">Loading the full preview…</p> : null}
+          {!preview && hit.source !== "web" && hit.source !== "images" ? <p className="mt-4 text-sm text-muted">{copy.loading}</p> : null}
         </div>
         <div className="flex gap-2 border-t border-line p-4">
           <a
             href={pageUrl}
             className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-full bg-ink px-4 text-sm font-medium text-bg"
           >
-            Open page
+            {copy.openPage}
             <ArrowUpRight className="size-4" aria-hidden="true" />
           </a>
           <NativeShareButton
-            title={preview?.title || hit.title}
+            title={shownTitle}
             url={() => pageUrl}
-            label="Share this page"
+            label={copy.share}
             className="border border-line"
           />
         </div>
@@ -1662,11 +2381,11 @@ function NativeShareButton({
   );
 }
 
-function resultCount(total: number | undefined, source: SourceId): string | null {
+function resultCount(total: number | undefined, source: SourceId, copy: UiCopy): string | null {
   if (!total || total <= 0) return null;
-  if (source === "web") return `About ${total.toLocaleString("en-US")} results`;
   const shown = total >= 10000 ? "10,000+" : total.toLocaleString("en-US");
-  return `${shown} result${total === 1 ? "" : "s"}`;
+  if (source === "web") return fill(copy.aboutResults, { n: shown });
+  return fill(total === 1 ? copy.resultOne : copy.resultMany, { n: shown });
 }
 
 function pageSize(source: SourceId): number {
@@ -1697,12 +2416,18 @@ function Pager({
   page,
   last,
   disabled,
+  previous,
+  next,
+  pageLabel,
   onPage,
 }: {
   label: string;
   page: number;
   last: number | null;
   disabled: boolean;
+  previous: string;
+  next: string;
+  pageLabel: string;
   onPage: (page: number) => void;
 }) {
   const hasNext = last == null || page < last;
@@ -1719,7 +2444,7 @@ function Pager({
         disabled={disabled || page <= 1}
         className="h-11 rounded-lg px-3 text-sm text-muted transition-transform duration-150 ease-out active:scale-[0.96] disabled:opacity-40"
       >
-        Previous
+        {previous}
       </button>
       {items.map((item, index) =>
         item === "…" ? (
@@ -1735,7 +2460,7 @@ function Pager({
             }}
             disabled={disabled}
             aria-current={item === page ? "page" : undefined}
-            aria-label={`${label} page ${item}`}
+            aria-label={fill(pageLabel, { label, n: String(item) })}
             className={`h-11 min-w-11 rounded-lg border px-2 text-sm tabular-nums transition-transform duration-150 ease-out active:scale-[0.96] disabled:opacity-40 ${
               item === page ? "border-line bg-line text-ink" : "border-line bg-surface text-ink"
             }`}
@@ -1750,7 +2475,7 @@ function Pager({
         disabled={disabled || !hasNext}
         className="h-11 rounded-lg px-3 text-sm text-ink transition-transform duration-150 ease-out active:scale-[0.96] disabled:opacity-40"
       >
-        Next
+        {next}
       </button>
     </nav>
   );
@@ -1762,18 +2487,18 @@ function formatCoord(lat: number, lon: number): string {
   return `${Math.abs(lat).toFixed(2)}° ${ns}, ${Math.abs(lon).toFixed(2)}° ${ew}`;
 }
 
-function PlaceList({ places, error }: { places: PlaceRef[]; error?: string }) {
+function PlaceList({ places, error, copy }: { places: PlaceRef[]; error?: string; copy: UiCopy }) {
   if (!places.length && !error) return null;
   return (
     <section aria-labelledby="location-refs" className="rounded-2xl border border-line bg-surface p-4">
       <div className="flex items-baseline justify-between gap-3">
         <h2 id="location-refs" className="font-display text-xl">
-          Location references
+          {copy.locations}
         </h2>
         {places.length > 0 ? <p className="text-sm text-muted tabular-nums">{places.length}</p> : null}
       </div>
       {error && !places.length ? (
-        <p className="mt-2 text-sm text-muted">Location references didn’t load.</p>
+        <p className="mt-2 text-sm text-muted">{copy.locationsFailed}</p>
       ) : (
         <ol className="mt-2">
           {places.map((place, index) => (
@@ -1787,7 +2512,7 @@ function PlaceList({ places, error }: { places: PlaceRef[]; error?: string }) {
                 <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">
                   <span className="tabular-nums">{formatCoord(place.lat, place.lon)}</span>
                   <a href={place.map} target="_blank" rel="noreferrer" className="font-medium text-ink">
-                    Map
+                    {copy.map}
                   </a>
                   <span>{place.source === "wiki" ? "Wikipedia" : "GeoNames"}</span>
                 </p>
@@ -1800,11 +2525,11 @@ function PlaceList({ places, error }: { places: PlaceRef[]; error?: string }) {
   );
 }
 
-function Lead({ card }: { card: NonNullable<SearchPayload["card"]> }) {
+function Lead({ card, copy }: { card: NonNullable<SearchPayload["card"]>; copy: UiCopy }) {
   return (
     <aside className="rounded-2xl border border-line bg-surface p-4">
       <p className="text-xs tracking-widest text-muted uppercase">
-        {card.source === "wiki" ? "Wikipedia" : "Grokipedia"}
+        {card.source === "wiki" ? copy.wiki : copy.grok}
       </p>
       {card.image ? (
         <img
@@ -1820,7 +2545,7 @@ function Lead({ card }: { card: NonNullable<SearchPayload["card"]> }) {
         href={card.url}
         className="mt-4 inline-flex min-h-11 items-center gap-1 text-sm font-medium text-ink"
       >
-        Read the article
+        {copy.readArticle}
         <ArrowUpRight className="size-4" aria-hidden="true" />
       </a>
     </aside>

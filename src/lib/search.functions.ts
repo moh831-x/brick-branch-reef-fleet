@@ -1,10 +1,10 @@
 import { createServerFn } from "@tanstack/react-start";
 import { GROK_PAGE, IMAGES_PAGE, MAX_PAGE, PAGE, WEB_PAGE } from "./search.shared";
 import { AI_MAX_CONTEXT, aiChoiceOf, cleanContextItem, type AiAnswer, type AiContextItem, type AiModelStatus } from "./ai.shared";
-import { aiModelStatus, runAiAnswer } from "./ai.server";
-import { runPreview, runSearch, runSuggest, runTrending, type HitPreview, type SearchInput, type SearchPayload, type SourceId, type Suggestion, type Trend } from "./search.server";
+import { aiModelStatus, runAiAnswer, runTranslate } from "./ai.server";
+import { asSearchLang, runPreview, runSearch, runSuggest, runTrending, type HitPreview, type SearchInput, type SearchPayload, type SourceId, type Suggestion, type Trend } from "./search.server";
 
-export type { HitPreview, ImageRef, LeadCard, PlaceRef, SearchHit, SearchInput, SearchPayload, SourceBlock, SourceId, Suggestion, Trend, WordDefinition, WordSense } from "./search.server";
+export type { HitPreview, ImageRef, LeadCard, PlaceRef, PreviewSection, SearchHit, SearchInput, SearchPayload, SourceBlock, SourceId, Suggestion, Trend, WordDefinition, WordSense } from "./search.server";
 
 function bool(value: unknown, fallback: boolean): boolean {
   if (typeof value === "boolean") return value;
@@ -36,9 +36,27 @@ function readSearch(input: unknown): SearchInput {
   };
 }
 
+const ANSWER_LANGUAGE: Record<string, string> = {
+  "zh-CN": "Simplified Chinese",
+  "hi-IN": "Hindi",
+  "bn-BD": "Bangla",
+};
+
+async function preferredLang(): Promise<string> {
+  try {
+    const { getCookie } = await import("@tanstack/react-start/server");
+    return getCookie("folio_lang") ?? "";
+  } catch {
+    return "";
+  }
+}
+
 export const searchAll = createServerFn({ method: "POST" })
   .validator(readSearch)
-  .handler(async ({ data }): Promise<SearchPayload> => runSearch(data));
+  .handler(async ({ data }): Promise<SearchPayload> => {
+    const lang = asSearchLang(await preferredLang());
+    return runSearch(lang ? { ...data, lang } : data);
+  });
 
 /**
  * The optional AI answer. The browser calls this only when the AI switch is on, after the
@@ -60,9 +78,13 @@ export const answerWithAi = createServerFn({ method: "POST" })
       seen.add(clean.url);
       context.push(clean);
     }
-    return { q, context, model: aiChoiceOf(raw.model) };
+    const requested = asSearchLang(typeof raw.lang === "string" ? raw.lang : "");
+    return { q, context, model: aiChoiceOf(raw.model), ...(requested ? { lang: requested } : {}) };
   })
-  .handler(async ({ data }): Promise<AiAnswer> => runAiAnswer(data.q, data.context, data.model));
+  .handler(async ({ data }): Promise<AiAnswer> => {
+    const lang = data.lang ?? asSearchLang(await preferredLang());
+    return runAiAnswer(data.q, data.context, data.model, lang ? { answerLanguage: ANSWER_LANGUAGE[lang] } : {});
+  });
 
 /** Which AI models can run with the keys on the server, for the model menu. No keys are returned. */
 export const listAiProviders = createServerFn({ method: "POST" })
@@ -80,6 +102,21 @@ export const suggestQueries = createServerFn({ method: "POST" })
 export const trendingTopics = createServerFn({ method: "POST" })
   .validator(() => ({}))
   .handler(async (): Promise<Trend[]> => runTrending());
+
+const PREVIEW_LANGS = new Set(["zh-CN", "hi-IN", "bn-BD"]);
+
+/** Translate the open preview into Chinese, Hindi, or Bangla. English is not sent. */
+export const translatePreview = createServerFn({ method: "POST" })
+  .validator((input: unknown) => {
+    if (typeof input !== "object" || input === null) throw new Error("Invalid translation");
+    const raw = input as Record<string, unknown>;
+    const lang = typeof raw.lang === "string" ? raw.lang : "";
+    const title = typeof raw.title === "string" ? raw.title.replace(/\s+/g, " ").trim().slice(0, 180) : "";
+    const text = typeof raw.text === "string" ? raw.text.trim().slice(0, 6000) : "";
+    if (!PREVIEW_LANGS.has(lang) || !title || !text) throw new Error("Invalid translation");
+    return { lang, title, text };
+  })
+  .handler(async ({ data }) => runTranslate(data));
 
 export const previewHit = createServerFn({ method: "POST" })
   .validator((input: unknown) => {

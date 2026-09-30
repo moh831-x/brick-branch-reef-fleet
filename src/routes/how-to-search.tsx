@@ -76,7 +76,14 @@ function HowToSearchPage() {
         </p>
         <p>
           Click the title or text of a result to open a preview panel. Close it with Escape or the close control.
-          While it is open, the left and right arrow keys move to the previous or next result. Open page goes to the
+          While it is open, the left and right arrow keys move to the previous or next result. The language menu on the
+          home screen, and the same choices in the preview, pick English, Bangla, Simplified Chinese, or Hindi. That
+          choice translates the preview, switches its buttons, and is the language used when you listen. This browser
+          remembers it, and the home screen, the search pages, and the AI answer use that language. When the preview comes from Wikipedia or Grokipedia and the article has sections, Contents
+          lists them. Choosing one scrolls to that part. When the language is not English, the next search translates your words and looks up the web and
+          Wikipedia in that language. A line under the query shows the words that were searched. Grokipedia still
+          uses the words you typed. English keeps the original text. The player’s voice button lists the voices this
+          browser has installed for that language, and the choice is remembered. Pause, stop, and speed are on the player, and closing the preview stops it. Open page goes to the
           original address in this window. The arrow button on the result row opens that address in a new tab. When a
           lead card is shown, Read the article opens the article in this window as well.
         </p>

@@ -126,19 +126,24 @@ function PrivacyPage() {
           <span className="font-mono">/api/search</span> works the same way. The query is in the
           address, and results come from the same services. The website asks an AI provider for a short answer on
           every search. The public search endpoint sends the query to an AI provider only when the address asks for
-          an AI answer (<span className="font-mono">ai=1</span>).
+          an AI answer (<span className="font-mono">ai=1</span>). If this browser has a preview language other than
+          English, Folio translates the query and sends that translation to Bing and Wikipedia, and asks the AI
+          answer to use the same language. Grokipedia still receives the words you typed.
         </p>
 
         <h2 className="pt-2 font-display text-2xl">What stays in your browser</h2>
-        <p>Folio keeps three items in your browser’s local storage for this site:</p>
+        <p>Folio keeps five items in your browser’s local storage for this site:</p>
         <ul className="grid list-disc gap-2 pl-5">
           <li>which sources you turned on or off;</li>
           <li>which AI model you picked, if you picked one;</li>
+          <li>which preview language you picked, if you picked one;</li>
+          <li>which speaking voice you picked for that language, if you picked one;</li>
           <li>your last six searches, shown under Recent;</li>
         </ul>
         <p>
-          These stay on your device. Folio’s server does not receive them as stored data. It only
-          receives the search you are running. To remove them, use Clear next to Recent, or clear
+          These stay on your device. The preview language is also stored in a cookie named{" "}
+          <span className="font-mono">folio_lang</span> so the next search can use it. That cookie is sent to
+          Folio’s server. The other saved items are not. To remove them, use Clear next to Recent, or clear
           this site’s data in your browser settings.
         </p>
 

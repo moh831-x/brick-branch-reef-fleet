@@ -179,8 +179,11 @@ export function configForModel(modelId: string, env: Env = process.env): Provide
 type Request = { url: string; init: RequestInit };
 
 /** Build the HTTP request for one provider. Exported for tests; it performs no I/O. */
-export function buildProviderRequest(config: ProviderConfig, query: string, context: AiContextItem[]): Request {
-  const prompt = buildAiPrompt(query, context);
+export function buildProviderRequest(config: ProviderConfig, query: string, context: AiContextItem[], language?: string): Request {
+  const system = language
+    ? `${AI_SYSTEM_PROMPT} Write the entire answer in ${language}, even when the results are in another language.`
+    : AI_SYSTEM_PROMPT;
+  const prompt = buildAiPrompt(query, context, language);
   if (config.api === "anthropic") {
     return {
       url: `${config.baseUrl}/messages`,
@@ -194,7 +197,7 @@ export function buildProviderRequest(config: ProviderConfig, query: string, cont
         body: JSON.stringify({
           model: config.model,
           max_tokens: MAX_OUTPUT_TOKENS,
-          system: AI_SYSTEM_PROMPT,
+          system,
           messages: [{ role: "user", content: prompt }],
           ...(config.effort ? { output_config: { effort: config.effort } } : {}),
         }),
@@ -212,7 +215,7 @@ export function buildProviderRequest(config: ProviderConfig, query: string, cont
         messages: [
           // "system" works on xAI, OpenAI (treated as developer instructions on reasoning models), and
           // other OpenAI-compatible endpoints.
-          { role: "system", content: AI_SYSTEM_PROMPT },
+          { role: "system", content: system },
           { role: "user", content: prompt },
         ],
         // OpenAI reasoning models reject temperature and max_tokens; they use max_completion_tokens.
@@ -242,8 +245,77 @@ export function readProviderResponse(config: ProviderConfig, body: unknown): { r
   return { raw: completion.choices?.[0]?.message?.content?.trim() ?? "", model: completion.model || config.model };
 }
 
-async function askProvider(config: ProviderConfig, query: string, context: AiContextItem[], fetcher: typeof fetch) {
-  const request = buildProviderRequest(config, query, context);
+const TRANSLATE_NAMES: Record<string, string> = {
+  "zh-CN": "Simplified Chinese",
+  "hi-IN": "Hindi",
+  "bn-BD": "Bangla",
+};
+
+/** Pull a translation object out of a model reply. Exported for tests. */
+export function readTranslation(raw: string): { title: string; text: string } | null {
+  const trimmed = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/```$/, "").trim();
+  const start = trimmed.indexOf("{");
+  const end = trimmed.lastIndexOf("}");
+  if (start < 0 || end <= start) return null;
+  try {
+    const parsed = JSON.parse(trimmed.slice(start, end + 1)) as { title?: unknown; text?: unknown };
+    const title = typeof parsed.title === "string" ? parsed.title.trim() : "";
+    const text = typeof parsed.text === "string" ? parsed.text.trim() : "";
+    if (!title || !text) return null;
+    return { title: title.slice(0, 240), text: text.slice(0, 6000) };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Translate a preview title and passage. Uses Grok when that key is set, otherwise the first
+ * gateway model that is set up. Throws when nothing is configured or the reply is not usable.
+ */
+export async function runTranslate(
+  input: { lang: string; title: string; text: string },
+  options: { env?: Env; fetcher?: typeof fetch } = {},
+): Promise<{ title: string; text: string }> {
+  const language = TRANSLATE_NAMES[input.lang];
+  if (!language) return { title: input.title, text: input.text };
+  const env = options.env ?? process.env;
+  const config =
+    readProviderConfig("grok", env) ??
+    configForModel("gpt-4.1-mini", env) ??
+    configForModel("gemini-2.5-flash-lite", env);
+  if (!config) throw new Error("unconfigured");
+  const fetcher = options.fetcher ?? fetch;
+  const prompt = `Translate into ${language}. Reply with JSON only: {"title":"...","text":"..."}. Keep lines that start with # as headings: translate the words after the # marks and leave the # marks in place. Keep names, dates, and numbers. Do not add notes.\n\nTitle: ${input.title}\n\nText:\n${input.text}`;
+  const openai = config.id === "openai" || config.id === "gemini" || config.gateway === true;
+  const response = await fetcher(`${config.baseUrl}/chat/completions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${config.apiKey}` },
+    body: JSON.stringify({
+      model: config.model,
+      messages: [
+        { role: "system", content: "You translate. Return JSON only." },
+        { role: "user", content: prompt },
+      ],
+      ...(openai ? { max_completion_tokens: 1200 } : { max_tokens: 1200, temperature: 0 }),
+      stream: false,
+    }),
+    signal: AbortSignal.timeout(AI_TIMEOUT_MS),
+  });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const { raw } = readProviderResponse(config, await response.json());
+  const parsed = readTranslation(raw);
+  if (!parsed) throw new Error("empty translation");
+  return parsed;
+}
+
+async function askProvider(
+  config: ProviderConfig,
+  query: string,
+  context: AiContextItem[],
+  fetcher: typeof fetch,
+  language?: string,
+) {
+  const request = buildProviderRequest(config, query, context, language);
   const response = await fetcher(request.url, { ...request.init, signal: AbortSignal.timeout(AI_TIMEOUT_MS) });
   // Log the status only: never the key, and never the reader's query.
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -261,7 +333,7 @@ export async function runAiAnswer(
   query: string,
   context: AiContextItem[],
   preferred?: string,
-  options: { env?: Env; fetcher?: typeof fetch } = {},
+  options: { env?: Env; fetcher?: typeof fetch; answerLanguage?: string } = {},
 ): Promise<AiAnswer> {
   const env = options.env ?? process.env;
   const fetcher = options.fetcher ?? fetch;
@@ -286,7 +358,7 @@ export async function runAiAnswer(
   const failed: AnswerProviderId[] = [];
   for (const config of queue) {
     try {
-      const answer = await askProvider(config, query, context, fetcher);
+      const answer = await askProvider(config, query, context, fetcher, options.answerLanguage);
       const requested = pickedProvider ?? providerPref;
       return { status: "ok", ...answer, provider: config.id, ...(requested ? { requested } : {}), failed };
     } catch (error) {

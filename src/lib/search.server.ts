@@ -61,6 +61,9 @@ export type SearchPayload = {
   places: PlaceRef[];
   placesError?: string;
   near: string;
+  /** Set when the web and Wikipedia search used a translation of `query`. */
+  searched?: string;
+  lang?: SearchLang;
   definitions: WordDefinition[];
   deepDive: string[];
 };
@@ -77,6 +80,8 @@ export type SearchInput = {
   imagesOffset: number;
   card: boolean;
   near: string;
+  /** Preferred preview language. English and unknown values search the query as typed. */
+  lang?: string;
 };
 
 export type PlaceRef = {
@@ -90,6 +95,13 @@ export type PlaceRef = {
   source: "wiki" | "map";
 };
 
+export type PreviewSection = {
+  id: string;
+  title: string;
+  level: number;
+  text: string;
+};
+
 export type HitPreview = {
   source: SourceId;
   title: string;
@@ -97,6 +109,7 @@ export type HitPreview = {
   extract: string;
   url: string;
   image?: string;
+  sections?: PreviewSection[];
 };
 
 export type Suggestion = {
@@ -113,6 +126,35 @@ export type Trend = {
 };
 
 const UA = "Mozilla/5.0 (compatible; Folio/1.0; personal research reader)";
+
+const SEARCH_LANG = {
+  "zh-CN": { wiki: "https://zh.wikipedia.org", setlang: "zh-Hans", mkt: "zh-CN", name: "Simplified Chinese" },
+  "hi-IN": { wiki: "https://hi.wikipedia.org", setlang: "hi", mkt: "hi-IN", name: "Hindi" },
+  "bn-BD": { wiki: "https://bn.wikipedia.org", setlang: "bn", mkt: "bn-BD", name: "Bangla" },
+} as const;
+
+export type SearchLang = keyof typeof SEARCH_LANG;
+
+export function asSearchLang(value: string | undefined): SearchLang | null {
+  if (value && value in SEARCH_LANG) return value as SearchLang;
+  return null;
+}
+
+function bingMarket(lang: SearchLang | null): string {
+  if (!lang) return "";
+  const row = SEARCH_LANG[lang];
+  return `&setlang=${row.setlang}&mkt=${encodeURIComponent(row.mkt)}`;
+}
+
+function wikiHost(url: string): string {
+  try {
+    const host = new URL(url).hostname;
+    if (host === "wikipedia.org" || host.endsWith(".wikipedia.org")) return `https://${host}`;
+  } catch {
+    /* use the English edition */
+  }
+  return "https://en.wikipedia.org";
+}
 
 function emptyBlock(): SourceBlock {
   return { results: [], done: true };
@@ -293,11 +335,12 @@ function readBingTotal(html: string): number | undefined {
   return total;
 }
 
-async function searchWeb(query: string, offset: number, near: string): Promise<SourceBlock> {
+async function searchWeb(query: string, offset: number, near: string, lang: SearchLang | null): Promise<SourceBlock> {
   const first = Math.max(1, offset + 1);
   const q = near ? `${query} ${near}` : query;
-  const rssUrl = `https://www.bing.com/search?q=${encodeURIComponent(q)}&format=rss&first=${first}&count=${WEB_PAGE}`;
-  const htmlUrl = `https://www.bing.com/search?q=${encodeURIComponent(q)}&count=${WEB_PAGE}`;
+  const market = bingMarket(lang);
+  const rssUrl = `https://www.bing.com/search?q=${encodeURIComponent(q)}&format=rss&first=${first}&count=${WEB_PAGE}${market}`;
+  const htmlUrl = `https://www.bing.com/search?q=${encodeURIComponent(q)}&count=${WEB_PAGE}${market}`;
   const [xml, html] = await Promise.all([
     getText(rssUrl, "application/rss+xml, application/xml, text/xml"),
     getText(htmlUrl, "text/html").catch(() => ""),
@@ -338,9 +381,9 @@ type WikiSearchResponse = {
   };
 };
 
-async function searchWiki(query: string, offset: number): Promise<{ block: SourceBlock; places: PlaceRef[] }> {
+async function searchWiki(query: string, offset: number, origin = "https://en.wikipedia.org"): Promise<{ block: SourceBlock; places: PlaceRef[] }> {
   const url =
-    "https://en.wikipedia.org/w/api.php?action=query&format=json&list=search" +
+    `${origin}/w/api.php?action=query&format=json&list=search` +
     `&srsearch=${encodeURIComponent(query)}&srlimit=${PAGE}&sroffset=${offset}&srnamespace=0` +
     "&srprop=snippet|timestamp&srinfo=totalhits";
   const data = await getWikiJson<WikiSearchResponse>(url);
@@ -348,7 +391,7 @@ async function searchWiki(query: string, offset: number): Promise<{ block: Sourc
   for (const row of data.query?.search ?? []) {
     const title = decodeEntities(row.title ?? "");
     if (!title) continue;
-    const article = `https://en.wikipedia.org/wiki/${encodeURIComponent(title.replace(/ /g, "_"))}`;
+    const article = `${origin}/wiki/${encodeURIComponent(title.replace(/ /g, "_"))}`;
     results.push({
       id: `wiki:${title}`,
       source: "wiki",
@@ -393,7 +436,8 @@ function wikiImage(value: string | undefined): string | undefined {
 }
 
 async function wikiCard(title: string, fallbackUrl: string): Promise<LeadCard | null> {
-  const url = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`;
+  const origin = wikiHost(fallbackUrl);
+  const url = `${origin}/api/rest_v1/page/summary/${encodeURIComponent(title)}`;
   const data = await getJson<WikiSummary>(url);
   const extract = clip(data.extract?.trim() ?? "", 420);
   if (!extract) return null;
@@ -523,18 +567,18 @@ export function parseBingImages(html: string): SearchHit[] {
   return hits;
 }
 
-async function imageBatch(query: string, first: number): Promise<SearchHit[]> {
+async function imageBatch(query: string, first: number, lang: SearchLang | null): Promise<SearchHit[]> {
   const url =
     `https://www.bing.com/images/async?q=${encodeURIComponent(query)}` +
-    `&first=${first}&count=${BING_IMAGE_BATCH}&adlt=${IMAGE_SAFE_SEARCH}`;
+    `&first=${first}&count=${BING_IMAGE_BATCH}&adlt=${IMAGE_SAFE_SEARCH}${bingMarket(lang)}`;
   return parseBingImages(await getText(url, "text/html"));
 }
 
-async function searchImages(query: string, offset: number): Promise<SourceBlock> {
+async function searchImages(query: string, offset: number, lang: SearchLang | null): Promise<SourceBlock> {
   const cap = IMAGES_MAX_PAGE * IMAGES_PAGE;
   if (offset >= cap) return { results: [], done: true };
   const want = Math.min(cap, offset + IMAGES_PAGE + 1);
-  const key = query.toLowerCase();
+  const key = `${lang ?? "en"}:${query.toLowerCase()}`;
   const cached = imagePoolCache.get(key);
   const fresh = cached && Date.now() - cached.at < 10 * 60 * 1000 ? cached : null;
   const hits = fresh ? [...fresh.hits] : [];
@@ -545,7 +589,7 @@ async function searchImages(query: string, offset: number): Promise<SourceBlock>
   while (!exhausted && hits.length < want && batch <= Math.ceil(cap / BING_IMAGE_BATCH)) {
     let rows: SearchHit[];
     try {
-      rows = await imageBatch(query, batch * BING_IMAGE_BATCH + 1);
+      rows = await imageBatch(query, batch * BING_IMAGE_BATCH + 1, lang);
     } catch (error) {
       if (!hits.length) throw error;
       break;
@@ -852,16 +896,29 @@ export async function runSearch(input: SearchInput): Promise<SearchPayload> {
   if (!input.web && !input.wiki && !input.grok && !input.images) {
     return { ...emptyPayload(query), tookMs: 0 };
   }
+  const lang = asSearchLang(input.lang);
+  let searched = query;
+  if (lang) {
+    try {
+      const { runTranslate } = await import("./ai.server");
+      const translated = await runTranslate({ lang, title: query, text: query });
+      const next = translated.title.replace(/\s+/g, " ").trim();
+      if (next) searched = next;
+    } catch {
+      searched = query;
+    }
+  }
+  const wikiOrigin = lang ? SEARCH_LANG[lang].wiki : "https://en.wikipedia.org";
 
   const [web, wikiOutcome, grok, images, definitions, deepDive] = await Promise.all([
-    input.web ? searchWeb(query, input.webOffset, input.near).catch(failed) : Promise.resolve(emptyBlock()),
+    input.web ? searchWeb(searched, input.webOffset, input.near, lang).catch(failed) : Promise.resolve(emptyBlock()),
     input.wiki
-      ? searchWiki(query, input.wikiOffset).catch((error) => ({ block: failed(error), places: [] as PlaceRef[] }))
+      ? searchWiki(searched, input.wikiOffset, wikiOrigin).catch((error) => ({ block: failed(error), places: [] as PlaceRef[] }))
       : Promise.resolve({ block: emptyBlock(), places: [] as PlaceRef[] }),
     input.grok ? searchGrok(query, input.grokOffset).catch(failed) : Promise.resolve(emptyBlock()),
-    input.images ? searchImages(query, input.imagesOffset).catch(failed) : Promise.resolve(emptyBlock()),
+    input.images ? searchImages(searched, input.imagesOffset, lang).catch(failed) : Promise.resolve(emptyBlock()),
     defineQuery(input.card ? query : ""),
-    input.web && input.webOffset === 0 ? readDeepDive(query).catch(() => []) : Promise.resolve([]),
+    input.web && input.webOffset === 0 ? readDeepDive(searched).catch(() => []) : Promise.resolve([]),
   ]);
   const wiki = wikiOutcome.block;
 
@@ -870,7 +927,7 @@ export async function runSearch(input: SearchInput): Promise<SearchPayload> {
     const lead =
       input.wikiOffset === 0
         ? wiki.results[0]
-        : (await searchWiki(query, 0).catch(() => ({ block: emptyBlock(), places: [] as PlaceRef[] }))).block.results[0];
+        : (await searchWiki(searched, 0, wikiOrigin).catch(() => ({ block: emptyBlock(), places: [] as PlaceRef[] }))).block.results[0];
     if (lead) card = await wikiCard(lead.title, lead.url).catch(() => null);
   }
   if (!card && input.card && input.grok && !grok.error) {
@@ -911,6 +968,7 @@ export async function runSearch(input: SearchInput): Promise<SearchPayload> {
     places,
     placesError,
     near: input.near,
+    ...(lang && searched !== query ? { searched, lang } : {}),
     definitions,
     deepDive,
   };
@@ -1095,18 +1153,59 @@ function grokSlug(url: string): string {
   }
 }
 
-function proseFromMarkdown(raw: string): string {
-  const withoutBox = raw.replace(/<!--Infobox Start[\s\S]*?<!--Infobox End-->/g, "\n");
-  const cleaned = withoutBox
-    .replace(/!\[[^\]]*\]\([^)]*\)/g, " ")
-    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
-    .replace(/^\s{0,3}#{1,6}\s+/gm, "")
-    .replace(/[*_]{1,3}([^*_\n]+)[*_]{1,3}/g, "$1");
-  const paragraphs = cleaned
-    .split(/\n{2,}/)
-    .map((part) => part.replace(/\s+/g, " ").trim())
-    .filter((part) => part.length > 80 && !part.startsWith("|"));
-  return clip(paragraphs.slice(0, 3).join("\n\n"), 1100);
+const SKIP_SECTION = /^(references|see also|external links|notes|further reading|bibliography|sources|citations|footnotes|works cited)$/i;
+
+function plainClip(value: string, max: number): string {
+  const clean = value.replace(/\s+/g, " ").trim();
+  if (clean.length <= max) return clean;
+  const cut = clean.slice(0, max - 1).replace(/\s+\S*$/, "").trim();
+  return `${cut || clean.slice(0, max - 1)}…`;
+}
+
+/** Split a Wikipedia plaintext extract or Grokipedia markdown page into a lead and a short contents list. */
+function articleParts(raw: string, kind: "wiki" | "md"): { lead: string; sections: PreviewSection[] } {
+  const source =
+    kind === "md"
+      ? raw
+          .replace(/<!--Infobox Start[\s\S]*?<!--Infobox End-->/g, "\n")
+          .replace(/!\[[^\]]*\]\([^)]*\)/g, " ")
+          .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+          .replace(/[*_]{1,3}([^*_\n]+)[*_]{1,3}/g, "$1")
+          .replace(/'{2,}/g, "")
+      : raw;
+  const heading = kind === "md" ? /^(#{1,3})\s+(.+?)\s*$/ : /^(={2,4})\s*(.+?)\s*\1\s*$/;
+  const leadLines: string[] = [];
+  const sections: PreviewSection[] = [];
+  let current: { title: string; level: number; lines: string[] } | null = null;
+  const push = () => {
+    if (!current || sections.length >= 12) {
+      current = null;
+      return;
+    }
+    const title = current.title.replace(/\[([^\]]*)\]/g, "$1").replace(/\s+/g, " ").trim();
+    const level = current.level;
+    const text = plainClip(current.lines.join(" "), 480);
+    current = null;
+    if (!title || SKIP_SECTION.test(title) || level < 1 || level > 2) return;
+    sections.push({ id: `s-${sections.length}`, title, level, text });
+  };
+  for (const line of source.split(/\n/)) {
+    const match = line.match(heading);
+    if (match) {
+      const marks = match[1] ?? "";
+      if (kind === "md" && marks.length === 1) {
+        push();
+        continue;
+      }
+      push();
+      current = { title: match[2] ?? "", level: marks.length - 1, lines: [] };
+      continue;
+    }
+    if (current) current.lines.push(line);
+    else leadLines.push(line);
+  }
+  push();
+  return { lead: plainClip(leadLines.join(" "), 700), sections };
 }
 
 function previewFallback(input: { source: SourceId; title: string; url: string; snippet: string }): HitPreview {
@@ -1134,17 +1233,34 @@ export async function runPreview(input: {
   const fallback = previewFallback(input);
   try {
     if (input.source === "wiki") {
-      const url = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(input.title)}`;
+      const origin = wikiHost(input.url);
+      const url = `${origin}/api/rest_v1/page/summary/${encodeURIComponent(input.title)}`;
       const data = await getJson<WikiSummary>(url);
       const extract = data.extract?.trim() || fallback.extract;
       if (!extract) return fallback;
+      let lead = clip(extract, 700);
+      let sections: PreviewSection[] = [];
+      try {
+        const parsed = await getWikiJson<{ query?: { pages?: Record<string, { extract?: string }> } }>(
+          `${origin}/w/api.php?action=query&format=json&redirects=1&prop=extracts&explaintext=1&exsectionformat=wiki&titles=${encodeURIComponent(data.title?.trim() || input.title)}`,
+        );
+        const page = Object.values(parsed.query?.pages ?? {})[0];
+        if (page?.extract) {
+          const parts = articleParts(page.extract, "wiki");
+          if (parts.lead) lead = parts.lead;
+          sections = parts.sections;
+        }
+      } catch {
+        sections = [];
+      }
       return {
         source: "wiki",
         title: data.title?.trim() || input.title,
         kicker: data.description?.trim() || "Wikipedia",
-        extract: clip(extract, 1100),
+        extract: lead,
         url: safeHttp(data.content_urls?.desktop?.page ?? "") ?? fallback.url,
         image: wikiImage(data.thumbnail?.source),
+        ...(sections.length ? { sections } : {}),
       };
     }
     if (input.source === "grok") {
@@ -1152,13 +1268,15 @@ export async function runPreview(input: {
       const data = await getJson<{ page?: { title?: string; content?: string } }>(
         `https://grokipedia.com/api/page-preview?slug=${encodeURIComponent(slug)}`,
       );
-      const extract = proseFromMarkdown(data.page?.content ?? "") || fallback.extract;
+      const parts = articleParts(data.page?.content ?? "", "md");
+      const extract = parts.lead || fallback.extract;
       return {
         source: "grok",
         title: data.page?.title?.trim() || input.title,
         kicker: "Grokipedia",
         extract,
         url: fallback.url,
+        ...(parts.sections.length ? { sections: parts.sections } : {}),
       };
     }
   } catch {
