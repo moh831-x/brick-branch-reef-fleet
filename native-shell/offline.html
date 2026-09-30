@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <title>Folio — You’re offline</title>
+    <style>
+      :root { --bg: #f3efe6; --ink: #1c1914; --muted: #6e675c; --accent: #0e6b52; --line: #e4dcd0; }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink);
+        font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif; -webkit-text-size-adjust: 100%; }
+      main { min-height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center;
+        padding: 32px 24px; text-align: center; }
+      .logo { width: 64px; height: 64px; }
+      h1 { font-family: "New York", Georgia, serif; font-weight: 600; font-size: 28px; margin: 24px 0 8px; }
+      p { color: var(--muted); font-size: 16px; line-height: 1.5; max-width: 22rem; margin: 0; }
+      button { margin-top: 28px; min-height: 48px; min-width: 180px; border: 0; border-radius: 999px;
+        background: var(--ink); color: var(--bg); font-size: 16px; font-weight: 600; padding: 0 24px; }
+      button:active { transform: scale(0.97); }
+      .status { margin-top: 16px; font-size: 14px; min-height: 20px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <svg class="logo" viewBox="0 0 32 32" role="img" aria-label="Folio">
+        <rect width="32" height="32" rx="7" fill="#0E6B52" />
+        <g fill="#F3EFE6">
+          <rect x="8" y="6" width="5.2" height="20" />
+          <rect x="8" y="6" width="16.2" height="4.6" />
+          <rect x="8" y="13.5" width="12.2" height="4" />
+          <rect x="6.2" y="23.4" width="8.8" height="2.6" rx="0.3" />
+        </g>
+      </svg>
+      <h1>You’re offline</h1>
+      <p>Folio searches the live web, so it needs a connection. Check Wi‑Fi or cellular data, then try again.</p>
+      <button type="button" id="retry">Try again</button>
+      <p class="status" id="status" aria-live="polite"></p>
+    </main>
+    <script>
+      (function () {
+        var SITE = "https://www.zip1.ai/";
+        var status = document.getElementById("status");
+        function retry() {
+          status.textContent = "Connecting…";
+          if (navigator.onLine === false) {
+            status.textContent = "Still offline. We’ll reconnect automatically.";
+            return;
+          }
+          window.location.replace(SITE);
+        }
+        document.getElementById("retry").addEventListener("click", retry);
+        window.addEventListener("online", retry);
+        try {
+          var plugins = window.Capacitor && window.Capacitor.Plugins;
+          if (plugins && plugins.SplashScreen) plugins.SplashScreen.hide();
+        } catch (e) {}
+      })();
+    </script>
+  </body>
+</html>

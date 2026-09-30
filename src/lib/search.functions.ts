@@ -1,8 +1,10 @@
 import { createServerFn } from "@tanstack/react-start";
 import { GROK_PAGE, IMAGES_PAGE, MAX_PAGE, PAGE, WEB_PAGE } from "./search.shared";
+import { AI_MAX_CONTEXT, aiProviderOf, cleanContextItem, type AiAnswer, type AiContextItem, type AiProviderStatus } from "./ai.shared";
+import { aiProviderStatus, runAiAnswer } from "./ai.server";
 import { runNetworkAd, runPreview, runSearch, runSuggest, runTrending, type HitPreview, type NetworkAd, type SearchInput, type SearchPayload, type SourceId, type Suggestion, type Trend } from "./search.server";
 
-export type { AiAnswer, HitPreview, ImageRef, LeadCard, NetworkAd, PlaceRef, SearchHit, SearchInput, SearchPayload, SourceBlock, SourceId, Suggestion, Trend, WordDefinition, WordSense } from "./search.server";
+export type { HitPreview, ImageRef, LeadCard, NetworkAd, PlaceRef, SearchHit, SearchInput, SearchPayload, SourceBlock, SourceId, Suggestion, Trend, WordDefinition, WordSense } from "./search.server";
 
 function bool(value: unknown, fallback: boolean): boolean {
   if (typeof value === "boolean") return value;
@@ -25,9 +27,6 @@ function readSearch(input: unknown): SearchInput {
     wiki: bool(raw.wiki, true),
     grok: bool(raw.grok, true),
     images: bool(raw.images, false),
-    ai: bool(raw.ai, false),
-    chatgpt: bool(raw.chatgpt, false),
-    claude: bool(raw.claude, false),
     webOffset: offsetOf(raw.webOffset),
     wikiOffset: offsetOf(raw.wikiOffset),
     grokOffset: offsetOf(raw.grokOffset),
@@ -40,6 +39,35 @@ function readSearch(input: unknown): SearchInput {
 export const searchAll = createServerFn({ method: "POST" })
   .validator(readSearch)
   .handler(async ({ data }): Promise<SearchPayload> => runSearch(data));
+
+/**
+ * The optional AI answer. The browser calls this only when the AI switch is on, after the
+ * other sources have loaded, and passes the top results it already has as context (from every
+ * source that is on), so the search is not fetched twice and the other sources never wait on
+ * the model. `provider` is the reader's pick; the server falls back to the next set-up provider.
+ */
+export const answerWithAi = createServerFn({ method: "POST" })
+  .validator((input: unknown) => {
+    if (typeof input !== "object" || input === null) throw new Error("Invalid answer request");
+    const raw = input as Record<string, unknown>;
+    const q = typeof raw.q === "string" ? raw.q.replace(/\s+/g, " ").trim().slice(0, 180) : "";
+    if (!q) throw new Error("Enter a search");
+    const context: AiContextItem[] = [];
+    const seen = new Set<string>();
+    for (const item of Array.isArray(raw.context) ? raw.context.slice(0, AI_MAX_CONTEXT) : []) {
+      const clean = cleanContextItem(item);
+      if (!clean || seen.has(clean.url)) continue;
+      seen.add(clean.url);
+      context.push(clean);
+    }
+    return { q, context, provider: aiProviderOf(raw.provider) };
+  })
+  .handler(async ({ data }): Promise<AiAnswer> => runAiAnswer(data.q, data.context, data.provider));
+
+/** Which AI providers have a key on the server, for the provider selector. No keys are returned. */
+export const listAiProviders = createServerFn({ method: "POST" })
+  .validator(() => ({}))
+  .handler(async (): Promise<AiProviderStatus[]> => aiProviderStatus());
 
 export const suggestQueries = createServerFn({ method: "POST" })
   .validator((input: unknown) => {

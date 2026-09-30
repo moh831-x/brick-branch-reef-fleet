@@ -50,13 +50,6 @@ export type SourceBlock = {
   done: boolean;
 };
 
-export type AiAnswer = {
-  text: string;
-  vendor: "grok" | "chatgpt" | "claude";
-  model: string;
-  sources: { title: string; url: string; snippet?: string }[];
-};
-
 export type SearchPayload = {
   query: string;
   tookMs: number;
@@ -70,12 +63,6 @@ export type SearchPayload = {
   near: string;
   definitions: WordDefinition[];
   deepDive: string[];
-  ai: AiAnswer | null;
-  aiError?: string;
-  chatgpt: AiAnswer | null;
-  chatgptError?: string;
-  claude: AiAnswer | null;
-  claudeError?: string;
 };
 
 export type SearchInput = {
@@ -88,12 +75,6 @@ export type SearchInput = {
   wikiOffset: number;
   grokOffset: number;
   imagesOffset: number;
-  /** Optional answer written from the result text. Off unless asked. */
-  ai: boolean;
-  /** Optional ChatGPT note from the result text. Off unless asked. */
-  chatgpt: boolean;
-  /** Optional Claude note from the result text. Off unless asked. */
-  claude: boolean;
   card: boolean;
   near: string;
 };
@@ -157,9 +138,6 @@ export function emptyPayload(query: string): SearchPayload {
     near: "",
     definitions: [],
     deepDive: [],
-    ai: null,
-    chatgpt: null,
-    claude: null,
   };
 }
 
@@ -875,123 +853,6 @@ function labelDive(value: string): string {
     .join(" ");
 }
 
-const aiCache = new Map<string, { at: number; value: AiAnswer }>();
-
-function answerNotes(blocks: SourceBlock[]): { title: string; url: string; snippet: string }[] {
-  const notes: { title: string; url: string; snippet: string }[] = [];
-  for (const block of blocks) {
-    for (const hit of block.results) {
-      const snippet = hit.snippet.trim();
-      if (!hit.title || !hit.url || snippet.length < 40) continue;
-      notes.push({ title: hit.title, url: hit.url, snippet: snippet.slice(0, 240) });
-      if (notes.length >= 6) return notes;
-    }
-  }
-  return notes;
-}
-
-const ANSWER_SYSTEM =
-  "Answer the query in 2 to 4 sentences using only the numbered sources. After each claim, cite the source numbers in brackets, such as [1] or [1][2]. Use only those brackets for citations. If the sources do not answer the query, say so in one sentence and do not add a citation. Do not invent dates or numbers that are not in the sources.";
-
-async function chatCompletion(url: string, apiKey: string, model: string, user: string): Promise<string> {
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-    signal: AbortSignal.timeout(12000),
-    body: JSON.stringify({
-      model,
-      temperature: 0.2,
-      max_tokens: 360,
-      messages: [
-        { role: "system", content: ANSWER_SYSTEM },
-        { role: "user", content: user },
-      ],
-    }),
-  });
-  if (!response.ok) throw new Error("did not respond");
-  const body = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
-  return (body.choices?.[0]?.message?.content ?? "").replace(/\s+/g, " ").trim().slice(0, 800);
-}
-
-async function claudeCompletion(apiKey: string, user: string): Promise<string> {
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-    },
-    signal: AbortSignal.timeout(12000),
-    body: JSON.stringify({
-      model: "claude-haiku-4-5",
-      max_tokens: 360,
-      temperature: 0.2,
-      system: ANSWER_SYSTEM,
-      messages: [{ role: "user", content: user }],
-    }),
-  });
-  if (!response.ok) throw new Error("did not respond");
-  const body = (await response.json()) as { content?: Array<{ text?: string }> };
-  return (body.content?.map((part) => part.text ?? "").join(" ") ?? "").replace(/\s+/g, " ").trim().slice(0, 800);
-}
-
-async function answerQuery(
-  query: string,
-  blocks: SourceBlock[],
-  vendor: "grok" | "chatgpt" | "claude" = "grok",
-): Promise<AiAnswer | null> {
-  const sources = answerNotes(blocks);
-  if (!sources.length) return null;
-  const key = `${vendor}\n${query}\n${sources.map((item) => item.url).join("\n")}`;
-  const cached = aiCache.get(key);
-  if (cached && Date.now() - cached.at < 10 * 60 * 1000) return cached.value;
-  const user = `Query: ${query}\n\nSources:\n${sources
-    .map((item, index) => `[${index + 1}] ${item.title}\n${item.url}\n${item.snippet}`)
-    .join("\n\n")}`;
-  const unavailable =
-    vendor === "chatgpt"
-      ? "ChatGPT search is not available right now."
-      : vendor === "claude"
-        ? "Claude search is not available right now."
-        : "AI search is not available right now.";
-  const silent =
-    vendor === "chatgpt"
-      ? "ChatGPT search did not respond."
-      : vendor === "claude"
-        ? "Claude search did not respond."
-        : "AI search did not respond.";
-  const apiKey =
-    vendor === "chatgpt" ? process.env.OPENAI_API_KEY : vendor === "claude" ? process.env.ANTHROPIC_API_KEY : process.env.XAI_API_KEY;
-  if (!apiKey) throw new Error(unavailable);
-  let text = "";
-  try {
-    text =
-      vendor === "claude"
-        ? await claudeCompletion(apiKey, user)
-        : await chatCompletion(
-            vendor === "chatgpt" ? "https://api.openai.com/v1/chat/completions" : "https://api.x.ai/v1/chat/completions",
-            apiKey,
-            vendor === "chatgpt" ? "gpt-4.1-mini" : "grok-4.5",
-            user,
-          );
-  } catch {
-    throw new Error(silent);
-  }
-  if (!text) throw new Error(silent);
-  const value: AiAnswer = {
-    text,
-    vendor,
-    model: vendor === "chatgpt" ? "gpt-4.1-mini" : vendor === "claude" ? "claude-haiku-4-5" : "grok-4.5",
-    sources: sources.map(({ title, url }) => ({ title, url })),
-  };
-  aiCache.set(key, { at: Date.now(), value });
-  if (aiCache.size > 40) {
-    const oldest = aiCache.keys().next().value;
-    if (oldest) aiCache.delete(oldest);
-  }
-  return value;
-}
-
 export async function runSearch(input: SearchInput): Promise<SearchPayload> {
   const started = Date.now();
   const query = input.q.replace(/\s+/g, " ").trim();
@@ -1010,39 +871,6 @@ export async function runSearch(input: SearchInput): Promise<SearchPayload> {
     input.web && input.webOffset === 0 ? readDeepDive(query).catch(() => []) : Promise.resolve([]),
   ]);
   const wiki = wikiOutcome.block;
-  const firstPage =
-    input.webOffset === 0 && input.wikiOffset === 0 && input.grokOffset === 0 && input.imagesOffset === 0;
-  let ai: AiAnswer | null = null;
-  let aiError: string | undefined;
-  let chatgpt: AiAnswer | null = null;
-  let chatgptError: string | undefined;
-  let claude: AiAnswer | null = null;
-  let claudeError: string | undefined;
-  if (firstPage && (input.ai || input.chatgpt || input.claude)) {
-    const take = async (on: boolean, vendor: "grok" | "chatgpt" | "claude") => {
-      if (!on) return { answer: null as AiAnswer | null, error: undefined as string | undefined };
-      try {
-        const answer = await answerQuery(query, [web, wiki, grok], vendor);
-        return {
-          answer,
-          error: answer ? undefined : "The results did not include enough text to answer.",
-        };
-      } catch (error) {
-        return { answer: null, error: error instanceof Error ? error.message : "Search did not respond." };
-      }
-    };
-    const [aiPack, chatgptPack, claudePack] = await Promise.all([
-      take(input.ai, "grok"),
-      take(input.chatgpt, "chatgpt"),
-      take(input.claude, "claude"),
-    ]);
-    ai = aiPack.answer;
-    aiError = aiPack.error;
-    chatgpt = chatgptPack.answer;
-    chatgptError = chatgptPack.error;
-    claude = claudePack.answer;
-    claudeError = claudePack.error;
-  }
 
   let card: LeadCard | null = null;
   if (input.card && input.wiki && !wiki.error) {
@@ -1092,12 +920,6 @@ export async function runSearch(input: SearchInput): Promise<SearchPayload> {
     near: input.near,
     definitions,
     deepDive,
-    ai,
-    aiError,
-    chatgpt,
-    chatgptError,
-    claude,
-    claudeError,
   };
 }
 

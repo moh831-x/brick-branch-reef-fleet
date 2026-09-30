@@ -8,6 +8,7 @@ export function SiteFooter() {
           Search
         </Link>
         <Link to="/about">About</Link>
+        <Link to="/privacy">Privacy</Link>
         <Link to="/how-to-search">How to search</Link>
       </nav>
     </footer>

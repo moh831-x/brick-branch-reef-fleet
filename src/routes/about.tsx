@@ -6,17 +6,6 @@ const DESCRIPTION =
   "Folio by Zip1 is a web search page. It lists public web results and can include Wikipedia and Grokipedia when those sources are switched on.";
 const CANONICAL = "https://www.zip1.ai/about";
 
-const aboutJsonLd = {
-  "@context": "https://schema.org",
-  "@type": "AboutPage",
-  "@id": CANONICAL,
-  url: CANONICAL,
-  name: TITLE,
-  description: DESCRIPTION,
-  isPartOf: { "@id": "https://www.zip1.ai/#website" },
-  about: { "@id": "https://www.zip1.ai/#website" },
-};
-
 export const Route = createFileRoute("/about")({
   head: () => ({
     meta: [
@@ -24,7 +13,6 @@ export const Route = createFileRoute("/about")({
       { name: "description", content: DESCRIPTION },
     ],
     links: [{ rel: "canonical", href: CANONICAL }],
-    scripts: [{ type: "application/ld+json", children: JSON.stringify(aboutJsonLd) }],
   }),
   component: AboutPage,
 });
@@ -51,18 +39,20 @@ function AboutPage() {
         </p>
         <p>
           Web, Wikipedia, and Grokipedia start switched on. Images starts off and adds a grid of pictures from Bing’s
-          public image results when you turn it on. Wikipedia, Grokipedia, and Images are marked optional. You can turn
-          any source on or off, and this browser remembers the choice. An AI switch starts on. When it is on, the
-          first page includes an AI answer written from those results, with numbered sources. The answer can be switched
-          between Grok, ChatGPT, and Claude. Each result shows the site logo. If every source is off, Folio does not run a
+          public image results when you turn it on. AI starts off too. When you turn it on, a short answer sits above the
+          lists, with numbered links to the results it used. It is written from the top results of every source that
+          is on by the provider you pick: Grok from xAI, ChatGPT from OpenAI, or Claude from Anthropic. It is labeled
+          as AI-generated and can be wrong. Wikipedia, Grokipedia, Images, and AI are marked optional. You can turn
+          any source on or off, and this browser remembers the choice. If every source is off, Folio does not run a
           search. The search button stays disabled, and the home page asks you to turn Web, Wikipedia, Grokipedia, or
           Images on again.
         </p>
         <p>
           When a search runs, each source that is on has its own list. If Wikipedia returns a first article, a short
           card can sit beside the lists. If Wikipedia is off and Grokipedia has a first result, that card can come from
-          Grokipedia instead. The side of the results can also show place names when a location is found, and short
-          definitions for words in the query. Those blocks show up only when the lookup returns them.
+          Grokipedia instead. The side of the results can also show a few references taken from the lists, place names
+          when a location is found, and short definitions for words in the query. Those blocks show up only when the
+          lookup returns them.
         </p>
         <p>
           Select a result to open a preview. On a wide screen the panel sits at the side. On a narrow screen it sits
@@ -73,9 +63,13 @@ function AboutPage() {
         </p>
         <p>
           A search address includes the query you typed. Those addresses are for searching, not articles of their own.
-          The written pages on this site are this one and{" "}
+          The written pages on this site are this one,{" "}
           <Link to="/how-to-search" className="text-accent">
             How to search
+          </Link>
+          , and the{" "}
+          <Link to="/privacy" className="text-accent">
+            Privacy policy
           </Link>
           .
         </p>

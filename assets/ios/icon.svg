@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- Full-bleed square: iOS applies the rounded mask itself. Glyph from public/favicon.svg, centred. -->
+  <rect width="32" height="32" fill="#0E6B52"/>
+  <g fill="#F3EFE6" transform="translate(16 16) scale(0.72) translate(-15.2 -16)">
+    <rect x="8" y="6" width="5.2" height="20"/>
+    <rect x="8" y="6" width="16.2" height="4.6"/>
+    <rect x="8" y="13.5" width="12.2" height="4"/>
+    <rect x="6.2" y="23.4" width="8.8" height="2.6" rx="0.3"/>
+  </g>
+</svg>

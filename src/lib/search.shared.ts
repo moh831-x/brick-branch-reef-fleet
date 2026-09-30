@@ -1,3 +1,5 @@
+import { aiProviderOf, type AiProviderId } from "./ai.shared.ts";
+
 export const PAGE = 8;
 export const WEB_PAGE = 10;
 export const GROK_PAGE = 12;
@@ -28,12 +30,10 @@ export type BotSearchQuery = {
   wiki: boolean;
   grok: boolean;
   images: boolean;
-  /** AI answer. Always on unless the request sets ai to 0. It is not a result source. */
+  /** Optional AI answer built from the top Web, Wikipedia, and Grokipedia results. Off unless asked for. */
   ai: boolean;
-  /** ChatGPT note. Off unless asked. It is not a result source. */
-  chatgpt: boolean;
-  /** Claude note. Off unless asked. It is not a result source. */
-  claude: boolean;
+  /** Preferred AI provider (`ai_model=grok|openai|claude`). Unset means the first one that is set up. */
+  aiModel?: AiProviderId;
   webOffset: number;
   wikiOffset: number;
   grokOffset: number;
@@ -51,7 +51,10 @@ function pageOffset(value: string | null, size: number): number {
   return (page - 1) * size;
 }
 
-/** Parameters for GET /api/search. Web, Wikipedia, and Grokipedia default on; Images defaults off. Pages start at 1. */
+/**
+ * Parameters for GET /api/search. Web, Wikipedia, and Grokipedia default on; Images and AI default off.
+ * AI is not a results list, so it does not count as a source on its own. Pages start at 1.
+ */
 export function readBotSearch(params: URLSearchParams): BotSearchQuery | { error: string } {
   const q = (params.get("q") ?? "").replace(/\s+/g, " ").trim().slice(0, 180);
   if (!q) return { error: "Enter a search" };
@@ -59,9 +62,7 @@ export function readBotSearch(params: URLSearchParams): BotSearchQuery | { error
   const wiki = sourceFlag(params.get("wiki"));
   const grok = sourceFlag(params.get("grok"));
   const images = sourceFlag(params.get("images"), false);
-  const ai = sourceFlag(params.get("ai"), true);
-  const chatgpt = sourceFlag(params.get("chatgpt"), false);
-  const claude = sourceFlag(params.get("claude"), false);
+  const ai = sourceFlag(params.get("ai"), false);
   if (!web && !wiki && !grok && !images) return { error: "Turn on Web, Wikipedia, Grokipedia, or Images" };
   return {
     q,
@@ -70,8 +71,7 @@ export function readBotSearch(params: URLSearchParams): BotSearchQuery | { error
     grok,
     images,
     ai,
-    chatgpt,
-    claude,
+    aiModel: aiProviderOf(params.get("ai_model")),
     webOffset: pageOffset(params.get("webPage"), WEB_PAGE),
     wikiOffset: pageOffset(params.get("wikiPage"), PAGE),
     grokOffset: pageOffset(params.get("grokPage"), GROK_PAGE),
