@@ -5,11 +5,11 @@
       "width": 1280,
       "height": 800,
       "status": 200,
-      "title": "Folio",
+      "title": "Folio by Zip1 — Web, Wikipedia & Grokipedia Search",
       "hasCanvas": false,
-      "bodyTextLen": 12,
-      "bodyTextHash": "4c4d3e1e215c5f7d57a9bd84a7ef6461d7ee600ff8680ccfe1074b7625d6fb41",
-      "bodyTextPrefix": "Folio Search",
+      "bodyTextLen": 151,
+      "bodyTextHash": "ab0e27e6bee28a4629bebfc4f924f1615870aadd93f9f11aff530f44d003803a",
+      "bodyTextPrefix": "Folio by Zip1 — Web, Wikipedia & Grokipedia Search Search AD KEV",
       "horizontalOverflow": false,
       "consoleErrors": [],
       "pageErrors": [],
@@ -19,11 +19,11 @@
       "width": 390,
       "height": 844,
       "status": 200,
-      "title": "Folio",
+      "title": "Folio by Zip1 — Web, Wikipedia & Grokipedia Search",
       "hasCanvas": false,
-      "bodyTextLen": 12,
-      "bodyTextHash": "4c4d3e1e215c5f7d57a9bd84a7ef6461d7ee600ff8680ccfe1074b7625d6fb41",
-      "bodyTextPrefix": "Folio Search",
+      "bodyTextLen": 151,
+      "bodyTextHash": "ab0e27e6bee28a4629bebfc4f924f1615870aadd93f9f11aff530f44d003803a",
+      "bodyTextPrefix": "Folio by Zip1 — Web, Wikipedia & Grokipedia Search Search AD KEV",
       "horizontalOverflow": false,
       "consoleErrors": [],
       "pageErrors": [],
@@ -35,9 +35,6 @@
   ],
   "authWarnings": [],
   "verdictFile": "/workspace/screenshots/app-builder-built.json",
-  "divergesFromBaseline": true,
-  "baselineReasons": [
-    "desktop: body text collapsed (284 -> 12 chars)",
-    "mobile: body text collapsed (284 -> 12 chars)"
-  ]
+  "divergesFromBaseline": false,
+  "baselineReasons": []
 }

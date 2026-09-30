@@ -2,7 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { GROK_PAGE, IMAGES_PAGE, MAX_PAGE, PAGE, WEB_PAGE } from "./search.shared";
 import { runNetworkAd, runPreview, runSearch, runSuggest, runTrending, type HitPreview, type NetworkAd, type SearchInput, type SearchPayload, type SourceId, type Suggestion, type Trend } from "./search.server";
 
-export type { HitPreview, ImageRef, LeadCard, NetworkAd, PlaceRef, SearchHit, SearchInput, SearchPayload, SourceBlock, SourceId, Suggestion, Trend, WordDefinition, WordSense } from "./search.server";
+export type { AiAnswer, HitPreview, ImageRef, LeadCard, NetworkAd, PlaceRef, SearchHit, SearchInput, SearchPayload, SourceBlock, SourceId, Suggestion, Trend, WordDefinition, WordSense } from "./search.server";
 
 function bool(value: unknown, fallback: boolean): boolean {
   if (typeof value === "boolean") return value;
@@ -25,6 +25,9 @@ function readSearch(input: unknown): SearchInput {
     wiki: bool(raw.wiki, true),
     grok: bool(raw.grok, true),
     images: bool(raw.images, false),
+    ai: bool(raw.ai, false),
+    chatgpt: bool(raw.chatgpt, false),
+    claude: bool(raw.claude, false),
     webOffset: offsetOf(raw.webOffset),
     wikiOffset: offsetOf(raw.wikiOffset),
     grokOffset: offsetOf(raw.grokOffset),

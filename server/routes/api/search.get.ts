@@ -37,6 +37,11 @@ export default async function searchRoute(event: { url: URL }): Promise<Response
         wiki: block(data.wiki),
         grok: block(data.grok),
         ...(parsed.images ? { images: block(data.images) } : {}),
+        ...(parsed.ai ? { ai: data.ai, ...(data.aiError ? { aiError: data.aiError } : {}) } : {}),
+        ...(parsed.chatgpt
+          ? { chatgpt: data.chatgpt, ...(data.chatgptError ? { chatgptError: data.chatgptError } : {}) }
+          : {}),
+        ...(parsed.claude ? { claude: data.claude, ...(data.claudeError ? { claudeError: data.claudeError } : {}) } : {}),
         deepDive: data.deepDive,
       },
       { headers: { "cache-control": "no-store" } },

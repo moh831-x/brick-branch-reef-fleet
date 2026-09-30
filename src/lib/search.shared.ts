@@ -28,6 +28,12 @@ export type BotSearchQuery = {
   wiki: boolean;
   grok: boolean;
   images: boolean;
+  /** AI answer. Always on unless the request sets ai to 0. It is not a result source. */
+  ai: boolean;
+  /** ChatGPT note. Off unless asked. It is not a result source. */
+  chatgpt: boolean;
+  /** Claude note. Off unless asked. It is not a result source. */
+  claude: boolean;
   webOffset: number;
   wikiOffset: number;
   grokOffset: number;
@@ -53,6 +59,9 @@ export function readBotSearch(params: URLSearchParams): BotSearchQuery | { error
   const wiki = sourceFlag(params.get("wiki"));
   const grok = sourceFlag(params.get("grok"));
   const images = sourceFlag(params.get("images"), false);
+  const ai = sourceFlag(params.get("ai"), true);
+  const chatgpt = sourceFlag(params.get("chatgpt"), false);
+  const claude = sourceFlag(params.get("claude"), false);
   if (!web && !wiki && !grok && !images) return { error: "Turn on Web, Wikipedia, Grokipedia, or Images" };
   return {
     q,
@@ -60,6 +69,9 @@ export function readBotSearch(params: URLSearchParams): BotSearchQuery | { error
     wiki,
     grok,
     images,
+    ai,
+    chatgpt,
+    claude,
     webOffset: pageOffset(params.get("webPage"), WEB_PAGE),
     wikiOffset: pageOffset(params.get("wikiPage"), PAGE),
     grokOffset: pageOffset(params.get("grokPage"), GROK_PAGE),

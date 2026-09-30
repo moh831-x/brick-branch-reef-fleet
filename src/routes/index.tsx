@@ -11,9 +11,16 @@ const HOME_URL = "https://www.zip1.ai/";
 const websiteJsonLd = {
   "@context": "https://schema.org",
   "@type": "WebSite",
+  "@id": "https://www.zip1.ai/#website",
   name: "Folio by Zip1",
   alternateName: "Folio",
   url: HOME_URL,
+  description: HOME_DESCRIPTION,
+  potentialAction: {
+    "@type": "SearchAction",
+    target: "https://www.zip1.ai/?q={search_term_string}",
+    "query-input": "required name=search_term_string",
+  },
 };
 
 export type FolioSearch = {
@@ -24,6 +31,14 @@ export type FolioSearch = {
   grok?: boolean;
   /** Images is opt-in: absent means off. */
   images?: boolean;
+  /** Absent means the AI answer is on. */
+  ai?: boolean;
+  /** Which answer to write. Absent means Grok. */
+  model?: "grok" | "chatgpt" | "claude";
+  /** ChatGPT note is opt-in: absent means off. */
+  chatgpt?: boolean;
+  /** Claude note is opt-in: absent means off. */
+  claude?: boolean;
   webPage?: number;
   wikiPage?: number;
   grokPage?: number;
@@ -49,6 +64,10 @@ export const Route = createFileRoute("/")({
     wiki: flag(raw.wiki),
     grok: flag(raw.grok),
     images: flag(raw.images),
+    ai: flag(raw.ai),
+    model: raw.model === "chatgpt" || raw.model === "claude" || raw.model === "grok" ? raw.model : undefined,
+    chatgpt: flag(raw.chatgpt),
+    claude: flag(raw.claude),
     webPage: pageOf(raw.webPage),
     wikiPage: pageOf(raw.wikiPage),
     grokPage: pageOf(raw.grokPage),
@@ -73,6 +92,8 @@ export const Route = createFileRoute("/")({
     wiki: search.wiki,
     grok: search.grok,
     images: search.images,
+    ai: search.ai,
+    model: search.model,
     webPage: search.webPage ?? 1,
     wikiPage: search.wikiPage ?? 1,
     grokPage: search.grokPage ?? 1,
@@ -81,6 +102,8 @@ export const Route = createFileRoute("/")({
   loader: ({ deps }) => {
     const q = deps.q.trim();
     if (!q) return null;
+    const aiOn = deps.ai !== false;
+    const model = deps.model === "chatgpt" || deps.model === "claude" ? deps.model : "grok";
     return searchAll({
       data: {
         q,
@@ -88,6 +111,9 @@ export const Route = createFileRoute("/")({
         wiki: deps.wiki !== false,
         grok: deps.grok !== false,
         images: deps.images === true,
+        ai: aiOn && model === "grok",
+        chatgpt: aiOn && model === "chatgpt",
+        claude: aiOn && model === "claude",
         webOffset: (deps.webPage - 1) * WEB_PAGE,
         wikiOffset: (deps.wikiPage - 1) * PAGE,
         grokOffset: (deps.grokPage - 1) * GROK_PAGE,

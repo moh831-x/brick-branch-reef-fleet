@@ -5,30 +5,39 @@ function pageOf(value) {
 	if (page <= 1) return void 0;
 	return Math.min(400, page);
 }
-function sourceFlag(value) {
-	if (value === null || value.trim() === "") return true;
+function sourceFlag(value, fallback = true) {
+	if (value === null || value.trim() === "") return fallback;
 	const flag = value.trim().toLowerCase();
 	return flag !== "0" && flag !== "false" && flag !== "off";
 }
 function pageOffset(value, size) {
 	return ((pageOf(value) ?? 1) - 1) * size;
 }
-/** Parameters for GET /api/search. Sources default on. Pages start at 1. */
+/** Parameters for GET /api/search. Web, Wikipedia, and Grokipedia default on; Images defaults off. Pages start at 1. */
 function readBotSearch(params) {
 	const q = (params.get("q") ?? "").replace(/\s+/g, " ").trim().slice(0, 180);
 	if (!q) return { error: "Enter a search" };
 	const web = sourceFlag(params.get("web"));
 	const wiki = sourceFlag(params.get("wiki"));
 	const grok = sourceFlag(params.get("grok"));
-	if (!web && !wiki && !grok) return { error: "Turn on Web, Wikipedia, or Grokipedia" };
+	const images = sourceFlag(params.get("images"), false);
+	const ai = sourceFlag(params.get("ai"), true);
+	const chatgpt = sourceFlag(params.get("chatgpt"), false);
+	const claude = sourceFlag(params.get("claude"), false);
+	if (!web && !wiki && !grok && !images) return { error: "Turn on Web, Wikipedia, Grokipedia, or Images" };
 	return {
 		q,
 		web,
 		wiki,
 		grok,
+		images,
+		ai,
+		chatgpt,
+		claude,
 		webOffset: pageOffset(params.get("webPage"), 10),
 		wikiOffset: pageOffset(params.get("wikiPage"), 8),
-		grokOffset: pageOffset(params.get("grokPage"), 12)
+		grokOffset: pageOffset(params.get("grokPage"), 12),
+		imagesOffset: pageOffset(params.get("imagesPage"), 24)
 	};
 }
 //#endregion
@@ -47,11 +56,15 @@ function emptyPayload(query) {
 		web: emptyBlock(),
 		wiki: emptyBlock(),
 		grok: emptyBlock(),
+		images: emptyBlock(),
 		card: null,
 		places: [],
 		near: "",
 		definitions: [],
-		deepDive: []
+		deepDive: [],
+		ai: null,
+		chatgpt: null,
+		claude: null
 	};
 }
 function decodeEntities(value) {
@@ -294,6 +307,120 @@ async function searchGrok(query, offset) {
 		done: results.length < 12 || typeof total === "number" && offset + results.length >= total
 	};
 }
+/** Bing hands back up to this many images per request. */
+var BING_IMAGE_BATCH = 35;
+/** Safe search for images. Bing's default for the web feed is Moderate; images ask for it explicitly. */
+var IMAGE_SAFE_SEARCH = "moderate";
+var imagePoolCache = /* @__PURE__ */ new Map();
+function unescapeAttr(value) {
+	return value.replace(/&quot;/g, "\"").replace(/&#39;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+}
+function bingThumb(value) {
+	if (typeof value !== "string") return null;
+	try {
+		const url = new URL(value);
+		if (url.protocol !== "https:") return null;
+		if (!url.hostname.endsWith(".bing.net") && !url.hostname.endsWith(".bing.com")) return null;
+		return url.toString();
+	} catch {
+		return null;
+	}
+}
+function dimension(value) {
+	const n = Number(value);
+	return Number.isFinite(n) && n > 0 && n < 1e5 ? Math.round(n) : void 0;
+}
+/** Parse the image tiles from Bing's public image results markup. */
+function parseBingImages(html) {
+	const hits = [];
+	const tiles = html.split(/\sm="(?=\{)/).slice(1);
+	for (const tile of tiles) {
+		const end = tile.indexOf("\"");
+		if (end < 0) continue;
+		let meta;
+		try {
+			meta = JSON.parse(unescapeAttr(tile.slice(0, end)));
+		} catch {
+			continue;
+		}
+		const page = typeof meta.purl === "string" ? safeHttp(meta.purl) : null;
+		const thumb = bingThumb(meta.turl);
+		if (!page || !thumb) continue;
+		const host = hostOf(page);
+		if (!host || host.endsWith("bing.com")) continue;
+		const media = typeof meta.murl === "string" ? safeHttp(meta.murl) : null;
+		const title = clip(decodeEntities((typeof meta.t === "string" ? meta.t : typeof meta.desc === "string" ? meta.desc : "").replace(/[\ue000-\ue001]/g, "")), 140) || host;
+		const rest = tile.slice(end, end + 4e3);
+		const size = rest.match(/class="nowrap">\s*(\d+)\s*(?:&#215;|×|x)\s*(\d+)/i);
+		const width = dimension(rest.match(/expw=(\d+)/)?.[1] ?? size?.[1]);
+		const height = dimension(rest.match(/exph=(\d+)/)?.[1] ?? size?.[2]);
+		hits.push({
+			id: `images:${media ?? thumb}`,
+			source: "images",
+			title,
+			url: page,
+			snippet: "",
+			meta: [host, width && height ? `${width}×${height}` : ""].filter(Boolean).join(" · "),
+			image: {
+				thumb,
+				full: media && media.startsWith("https:") ? media : thumb,
+				width,
+				height
+			}
+		});
+	}
+	return hits;
+}
+async function imageBatch(query, first) {
+	return parseBingImages(await getText(`https://www.bing.com/images/async?q=${encodeURIComponent(query)}&first=${first}&count=${BING_IMAGE_BATCH}&adlt=${IMAGE_SAFE_SEARCH}`, "text/html"));
+}
+async function searchImages(query, offset) {
+	const cap = 240;
+	if (offset >= cap) return {
+		results: [],
+		done: true
+	};
+	const want = Math.min(cap, offset + 24 + 1);
+	const key = query.toLowerCase();
+	const cached = imagePoolCache.get(key);
+	const fresh = cached && Date.now() - cached.at < 6e5 ? cached : null;
+	const hits = fresh ? [...fresh.hits] : [];
+	let exhausted = fresh?.exhausted ?? false;
+	const seen = new Set(hits.map((hit) => hit.id));
+	let batch = Math.ceil(hits.length / BING_IMAGE_BATCH);
+	while (!exhausted && hits.length < want && batch <= Math.ceil(cap / BING_IMAGE_BATCH)) {
+		let rows;
+		try {
+			rows = await imageBatch(query, batch * BING_IMAGE_BATCH + 1);
+		} catch (error) {
+			if (!hits.length) throw error;
+			break;
+		}
+		batch += 1;
+		let added = 0;
+		for (const row of rows) {
+			if (seen.has(row.id)) continue;
+			seen.add(row.id);
+			hits.push(row);
+			added += 1;
+		}
+		if (added === 0) exhausted = true;
+	}
+	imagePoolCache.set(key, {
+		at: fresh?.at ?? Date.now(),
+		hits,
+		exhausted
+	});
+	if (imagePoolCache.size > 40) {
+		const oldest = imagePoolCache.keys().next().value;
+		if (oldest) imagePoolCache.delete(oldest);
+	}
+	const results = hits.slice(offset, offset + 24);
+	return {
+		results,
+		done: results.length < 24 || offset + 24 >= cap || exhausted && hits.length <= offset + 24
+	};
+}
 function failed(error) {
 	return {
 		results: [],
@@ -525,14 +652,114 @@ function labelDive(value) {
 		return lower.replace(/^([a-z])/, (letter) => letter.toUpperCase());
 	}).join(" ");
 }
+var aiCache = /* @__PURE__ */ new Map();
+function answerNotes(blocks) {
+	const notes = [];
+	for (const block of blocks) for (const hit of block.results) {
+		const snippet = hit.snippet.trim();
+		if (!hit.title || !hit.url || snippet.length < 40) continue;
+		notes.push({
+			title: hit.title,
+			url: hit.url,
+			snippet: snippet.slice(0, 240)
+		});
+		if (notes.length >= 6) return notes;
+	}
+	return notes;
+}
+var ANSWER_SYSTEM = "Answer the query in 2 to 4 sentences using only the numbered sources. After each claim, cite the source numbers in brackets, such as [1] or [1][2]. Use only those brackets for citations. If the sources do not answer the query, say so in one sentence and do not add a citation. Do not invent dates or numbers that are not in the sources.";
+async function chatCompletion(url, apiKey, model, user) {
+	const response = await fetch(url, {
+		method: "POST",
+		headers: {
+			"Content-Type": "application/json",
+			Authorization: `Bearer ${apiKey}`
+		},
+		signal: AbortSignal.timeout(12e3),
+		body: JSON.stringify({
+			model,
+			temperature: .2,
+			max_tokens: 360,
+			messages: [{
+				role: "system",
+				content: ANSWER_SYSTEM
+			}, {
+				role: "user",
+				content: user
+			}]
+		})
+	});
+	if (!response.ok) throw new Error("did not respond");
+	return ((await response.json()).choices?.[0]?.message?.content ?? "").replace(/\s+/g, " ").trim().slice(0, 800);
+}
+async function claudeCompletion(apiKey, user) {
+	const response = await fetch("https://api.anthropic.com/v1/messages", {
+		method: "POST",
+		headers: {
+			"Content-Type": "application/json",
+			"x-api-key": apiKey,
+			"anthropic-version": "2023-06-01"
+		},
+		signal: AbortSignal.timeout(12e3),
+		body: JSON.stringify({
+			model: "claude-haiku-4-5",
+			max_tokens: 360,
+			temperature: .2,
+			system: ANSWER_SYSTEM,
+			messages: [{
+				role: "user",
+				content: user
+			}]
+		})
+	});
+	if (!response.ok) throw new Error("did not respond");
+	return ((await response.json()).content?.map((part) => part.text ?? "").join(" ") ?? "").replace(/\s+/g, " ").trim().slice(0, 800);
+}
+async function answerQuery(query, blocks, vendor = "grok") {
+	const sources = answerNotes(blocks);
+	if (!sources.length) return null;
+	const key = `${vendor}\n${query}\n${sources.map((item) => item.url).join("\n")}`;
+	const cached = aiCache.get(key);
+	if (cached && Date.now() - cached.at < 6e5) return cached.value;
+	const user = `Query: ${query}\n\nSources:\n${sources.map((item, index) => `[${index + 1}] ${item.title}\n${item.url}\n${item.snippet}`).join("\n\n")}`;
+	const unavailable = vendor === "chatgpt" ? "ChatGPT search is not available right now." : vendor === "claude" ? "Claude search is not available right now." : "AI search is not available right now.";
+	const silent = vendor === "chatgpt" ? "ChatGPT search did not respond." : vendor === "claude" ? "Claude search did not respond." : "AI search did not respond.";
+	const apiKey = vendor === "chatgpt" ? process.env.OPENAI_API_KEY : vendor === "claude" ? process.env.ANTHROPIC_API_KEY : process.env.XAI_API_KEY;
+	if (!apiKey) throw new Error(unavailable);
+	let text = "";
+	try {
+		text = vendor === "claude" ? await claudeCompletion(apiKey, user) : await chatCompletion(vendor === "chatgpt" ? "https://api.openai.com/v1/chat/completions" : "https://api.x.ai/v1/chat/completions", apiKey, vendor === "chatgpt" ? "gpt-4.1-mini" : "grok-4.5", user);
+	} catch {
+		throw new Error(silent);
+	}
+	if (!text) throw new Error(silent);
+	const value = {
+		text,
+		vendor,
+		model: vendor === "chatgpt" ? "gpt-4.1-mini" : vendor === "claude" ? "claude-haiku-4-5" : "grok-4.5",
+		sources: sources.map(({ title, url }) => ({
+			title,
+			url
+		}))
+	};
+	aiCache.set(key, {
+		at: Date.now(),
+		value
+	});
+	if (aiCache.size > 40) {
+		const oldest = aiCache.keys().next().value;
+		if (oldest) aiCache.delete(oldest);
+	}
+	return value;
+}
 async function runSearch(input) {
 	const started = Date.now();
 	const query = input.q.replace(/\s+/g, " ").trim();
-	if (!input.web && !input.wiki && !input.grok) return {
+	if (!input.web && !input.wiki && !input.grok && !input.images) return {
 		...emptyPayload(query),
 		tookMs: 0
 	};
-	const [web, wikiOutcome, grok, definitions, deepDive] = await Promise.all([
+	const [web, wikiOutcome, grok, images, definitions, deepDive] = await Promise.all([
 		input.web ? searchWeb(query, input.webOffset, input.near).catch(failed) : Promise.resolve(emptyBlock()),
 		input.wiki ? searchWiki(query, input.wikiOffset).catch((error) => ({
 			block: failed(error),
@@ -542,10 +769,53 @@ async function runSearch(input) {
 			places: []
 		}),
 		input.grok ? searchGrok(query, input.grokOffset).catch(failed) : Promise.resolve(emptyBlock()),
+		input.images ? searchImages(query, input.imagesOffset).catch(failed) : Promise.resolve(emptyBlock()),
 		defineQuery(input.card ? query : ""),
 		input.web && input.webOffset === 0 ? readDeepDive(query).catch(() => []) : Promise.resolve([])
 	]);
 	const wiki = wikiOutcome.block;
+	const firstPage = input.webOffset === 0 && input.wikiOffset === 0 && input.grokOffset === 0 && input.imagesOffset === 0;
+	let ai = null;
+	let aiError;
+	let chatgpt = null;
+	let chatgptError;
+	let claude = null;
+	let claudeError;
+	if (firstPage && (input.ai || input.chatgpt || input.claude)) {
+		const take = async (on, vendor) => {
+			if (!on) return {
+				answer: null,
+				error: void 0
+			};
+			try {
+				const answer = await answerQuery(query, [
+					web,
+					wiki,
+					grok
+				], vendor);
+				return {
+					answer,
+					error: answer ? void 0 : "The results did not include enough text to answer."
+				};
+			} catch (error) {
+				return {
+					answer: null,
+					error: error instanceof Error ? error.message : "Search did not respond."
+				};
+			}
+		};
+		const [aiPack, chatgptPack, claudePack] = await Promise.all([
+			take(input.ai, "grok"),
+			take(input.chatgpt, "chatgpt"),
+			take(input.claude, "claude")
+		]);
+		ai = aiPack.answer;
+		aiError = aiPack.error;
+		chatgpt = chatgptPack.answer;
+		chatgptError = chatgptPack.error;
+		claude = claudePack.answer;
+		claudeError = claudePack.error;
+	}
 	let card = null;
 	if (input.card && input.wiki && !wiki.error) {
 		const lead = input.wikiOffset === 0 ? wiki.results[0] : (await searchWiki(query, 0).catch(() => ({
@@ -578,12 +848,19 @@ async function runSearch(input) {
 		web,
 		wiki,
 		grok,
+		images,
 		card,
 		places,
 		placesError,
 		near: input.near,
 		definitions,
-		deepDive
+		deepDive,
+		ai,
+		aiError,
+		chatgpt,
+		chatgptError,
+		claude,
+		claudeError
 	};
 }
 //#endregion
@@ -597,7 +874,15 @@ function block(source) {
 			title: hit.title,
 			url: hit.url,
 			snippet: hit.snippet,
-			meta: hit.meta
+			meta: hit.meta,
+			...hit.image ? {
+				image: hit.image.full,
+				thumbnail: hit.image.thumb,
+				...hit.image.width && hit.image.height ? {
+					width: hit.image.width,
+					height: hit.image.height
+				} : {}
+			} : {}
 		}))
 	};
 }
@@ -619,6 +904,19 @@ async function searchRoute(event) {
 			web: block(data.web),
 			wiki: block(data.wiki),
 			grok: block(data.grok),
+			...parsed.images ? { images: block(data.images) } : {},
+			...parsed.ai ? {
+				ai: data.ai,
+				...data.aiError ? { aiError: data.aiError } : {}
+			} : {},
+			...parsed.chatgpt ? {
+				chatgpt: data.chatgpt,
+				...data.chatgptError ? { chatgptError: data.chatgptError } : {}
+			} : {},
+			...parsed.claude ? {
+				claude: data.claude,
+				...data.claudeError ? { claudeError: data.claudeError } : {}
+			} : {},
 			deepDive: data.deepDive
 		}, { headers: { "cache-control": "no-store" } });
 	} catch {

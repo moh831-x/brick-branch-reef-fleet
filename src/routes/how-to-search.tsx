@@ -6,6 +6,53 @@ const DESCRIPTION =
   "How to use Folio: enter a query, switch Web, Wikipedia, Grokipedia, and Images on or off, open a result, and move between pages.";
 const CANONICAL = "https://www.zip1.ai/how-to-search";
 
+const howToJsonLd = {
+  "@context": "https://schema.org",
+  "@type": "WebPage",
+  "@id": CANONICAL,
+  url: CANONICAL,
+  name: TITLE,
+  description: DESCRIPTION,
+  isPartOf: { "@id": "https://www.zip1.ai/#website" },
+  mainEntity: {
+    "@type": "FAQPage",
+    mainEntity: [
+      {
+        "@type": "Question",
+        name: "What if every source is off?",
+        acceptedAnswer: {
+          "@type": "Answer",
+          text: "Folio does not run the search. Turn Web, Wikipedia, Grokipedia, or Images on. The search button works again as soon as one source is on and the box is not empty.",
+        },
+      },
+      {
+        "@type": "Question",
+        name: "What if one source does not respond?",
+        acceptedAnswer: {
+          "@type": "Answer",
+          text: "That source shows a notice that it did not respond. Sources that are still on keep their own results.",
+        },
+      },
+      {
+        "@type": "Question",
+        name: "What if nothing matches?",
+        acceptedAnswer: {
+          "@type": "Answer",
+          text: "An empty source says it has no matches. If every source that is on is empty, Folio says nothing matched and suggests fewer words or another source.",
+        },
+      },
+      {
+        "@type": "Question",
+        name: "Is a search address its own page?",
+        acceptedAnswer: {
+          "@type": "Answer",
+          text: "No. The query stays on the Folio search page. About and this page are the pages that explain the site.",
+        },
+      },
+    ],
+  },
+};
+
 export const Route = createFileRoute("/how-to-search")({
   head: () => ({
     meta: [
@@ -13,6 +60,7 @@ export const Route = createFileRoute("/how-to-search")({
       { name: "description", content: DESCRIPTION },
     ],
     links: [{ rel: "canonical", href: CANONICAL }],
+    scripts: [{ type: "application/ld+json", children: JSON.stringify(howToJsonLd) }],
   }),
   component: HowToSearchPage,
 });
@@ -36,6 +84,12 @@ function HowToSearchPage() {
           start on. Images starts off. Wikipedia, Grokipedia, and Images are marked optional. After you search, the
           switches sit with the search box. On the home page they stay hidden until every source is off. Then they
           appear under the message “Turn on Web, Wikipedia, Grokipedia, or Images to search.”
+        </p>
+        <p>
+          An AI switch sits with the sources and starts on. When it is on, the first page includes an AI answer written
+          from the results, with numbered sources. Grok, ChatGPT, and Claude are tabs on that answer. Later pages do not
+          ask again. Turning the switch off leaves the result lists and does not write an answer. Turning every source
+          off still stops the search.
         </p>
         <p>
           Turning a switch off removes that source from the search. This browser stores the choice. If all four are
