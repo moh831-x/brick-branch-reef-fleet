@@ -64,6 +64,32 @@ describe("provider config", () => {
     assert.equal(custom?.effort, undefined);
   });
 
+  it("sets up ChatGPT and Claude through the AI Gateway when they have no key of their own", () => {
+    const env = { AI_GATEWAY_API_KEY: "gateway-key" };
+    assert.deepEqual(availableAiProviders(env), ["openai", "claude"]);
+    assert.equal(readProviderConfig("grok", env), null);
+
+    const openai = readProviderConfig("openai", env)!;
+    assert.equal(openai.model, "openai/gpt-4.1-mini");
+    assert.equal(openai.baseUrl, "https://ai-gateway.vercel.sh/v1");
+    const openaiRequest = buildProviderRequest(openai, "dogs", context);
+    assert.equal(openaiRequest.url, "https://ai-gateway.vercel.sh/v1/chat/completions");
+    assert.equal(headers(openaiRequest.init).Authorization, "Bearer gateway-key");
+    assert.equal(body(openaiRequest.init).temperature, undefined);
+
+    const claude = readProviderConfig("claude", env)!;
+    assert.equal(claude.model, "anthropic/claude-3-haiku");
+    assert.equal(claude.api, "chat");
+    const claudeRequest = buildProviderRequest(claude, "dogs", context);
+    assert.equal(claudeRequest.url, "https://ai-gateway.vercel.sh/v1/chat/completions");
+    assert.equal(headers(claudeRequest.init).Authorization, "Bearer gateway-key");
+    assert.equal(headers(claudeRequest.init)["x-api-key"], undefined);
+
+    // A provider's own key still talks to that provider, not the gateway.
+    assert.equal(readProviderConfig("claude", { ...env, ANTHROPIC_API_KEY: "a-key" })?.baseUrl, "https://api.anthropic.com/v1");
+    assert.ok(!JSON.stringify(aiProviderStatus(env)).includes("gateway-key"));
+  });
+
   it("reports availability and models but never keys", () => {
     const status = aiProviderStatus({ OPENAI_API_KEY: "secret-openai" });
     assert.deepEqual(

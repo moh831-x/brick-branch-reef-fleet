@@ -6,8 +6,10 @@
  *   ChatGPT (OpenAI)    OPENAI_API_KEY, OPENAI_MODEL, OPENAI_BASE_URL     Chat Completions
  *   Claude (Anthropic)  ANTHROPIC_API_KEY, ANTHROPIC_MODEL, ANTHROPIC_BASE_URL  Messages API
  *
- * A provider without a key is "not set up" and is never called. The reader's pick is tried first;
- * if it fails, the next set-up provider is tried (Grok, ChatGPT, Claude order).
+ * ChatGPT and Claude can also share one Vercel AI Gateway key, AI_GATEWAY_API_KEY, when they do
+ * not have a key of their own. Their own keys still win. A provider without either key is "not
+ * set up" and is never called. The reader's pick is tried first; if it fails, the next set-up
+ * provider is tried (Grok, ChatGPT, Claude order).
  */
 import {
   AI_MESSAGES,
@@ -80,6 +82,13 @@ export const ANTHROPIC_VERSION = "2023-06-01";
 const AI_TIMEOUT_MS = 20_000;
 /** Room for a few sentences plus any reasoning tokens the model spends first. */
 const MAX_OUTPUT_TOKENS = 1200;
+/** OpenAI-compatible endpoint. One key covers ChatGPT and Claude when they have no key of their own. */
+const AI_GATEWAY_BASE = "https://ai-gateway.vercel.sh/v1";
+/** Models the current AI Gateway plan can call. Direct provider keys still use their own defaults. */
+const AI_GATEWAY_MODELS = {
+  openai: "openai/gpt-4.1-mini",
+  claude: "anthropic/claude-3-haiku",
+} as const;
 
 export type ProviderConfig = {
   id: AiProviderId;
@@ -88,21 +97,28 @@ export type ProviderConfig = {
   baseUrl: string;
   model: string;
   effort?: string;
+  /** True when this call goes through Vercel AI Gateway instead of the provider's own API. */
+  gateway?: boolean;
 };
 
 export function readProviderConfig(id: AiProviderId, env: Env = process.env): ProviderConfig | null {
   const spec = AI_PROVIDER_SPECS[id];
-  const apiKey = env[spec.keyVar]?.trim();
-  if (!apiKey) return null;
-  const model = env[spec.modelVar]?.trim() || spec.defaultModel;
-  const effort = (spec.effortVar && env[spec.effortVar]?.trim()) || (model === spec.defaultModel ? spec.defaultEffort : undefined);
+  const ownKey = env[spec.keyVar]?.trim();
+  const gatewayKey = id === "grok" ? "" : env.AI_GATEWAY_API_KEY?.trim() || "";
+  if (!ownKey && !gatewayKey) return null;
+  const viaGateway = !ownKey;
+  const model =
+    env[spec.modelVar]?.trim() || (viaGateway && id !== "grok" ? AI_GATEWAY_MODELS[id] : spec.defaultModel);
+  const effort =
+    (spec.effortVar && env[spec.effortVar]?.trim()) || (!viaGateway && model === spec.defaultModel ? spec.defaultEffort : undefined);
   return {
     id,
-    api: spec.api,
-    apiKey,
-    baseUrl: (env[spec.baseVar]?.trim() || spec.defaultBase).replace(/\/+$/, ""),
+    api: viaGateway ? "chat" : spec.api,
+    apiKey: ownKey || gatewayKey,
+    baseUrl: (viaGateway ? AI_GATEWAY_BASE : env[spec.baseVar]?.trim() || spec.defaultBase).replace(/\/+$/, ""),
     model,
     effort,
+    gateway: viaGateway || undefined,
   };
 }
 
@@ -143,7 +159,7 @@ export function buildProviderRequest(config: ProviderConfig, query: string, cont
       },
     };
   }
-  const openai = config.id === "openai";
+  const openai = config.id === "openai" || config.gateway === true;
   return {
     url: `${config.baseUrl}/chat/completions`,
     init: {
