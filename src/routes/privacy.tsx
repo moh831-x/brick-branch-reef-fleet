@@ -54,7 +54,7 @@ function PrivacyPage() {
         <h2 className="pt-2 font-display text-2xl">In short</h2>
         <ul className="grid list-disc gap-2 pl-5">
           <li>There are no accounts. Folio never asks for your name or email address.</li>
-          <li>Folio’s code sets no cookies and includes no analytics or tracking scripts.</li>
+          <li>Folio does not use its own analytics. Google AdSense may use advertising cookies and tracking.</li>
           <li>
             When you search, your search text goes to Folio’s server. The server passes it to the
             sources you have on to get results. Folio does not save your searches in a database.
@@ -67,8 +67,8 @@ function PrivacyPage() {
             Your source settings and recent searches are kept in your browser, not on our server.
           </li>
           <li>
-            Ads are off unless you turn them on. Even then, your search is never sent to the ad
-            network.
+            Google AdSense may display ads and receive browser details and the page URL, which
+            can include your search query on results pages.
           </li>
         </ul>
 
@@ -130,12 +130,11 @@ function PrivacyPage() {
         </p>
 
         <h2 className="pt-2 font-display text-2xl">What stays in your browser</h2>
-        <p>Folio keeps four items in your browser’s local storage for this site:</p>
+        <p>Folio keeps three items in your browser’s local storage for this site:</p>
         <ul className="grid list-disc gap-2 pl-5">
           <li>which sources you turned on or off;</li>
           <li>which AI model you picked, if you picked one;</li>
           <li>your last six searches, shown under Recent;</li>
-          <li>whether you turned sponsored listings on.</li>
         </ul>
         <p>
           These stay on your device. Folio’s server does not receive them as stored data. It only
@@ -197,12 +196,15 @@ function PrivacyPage() {
 
         <h2 className="pt-2 font-display text-2xl">Ads</h2>
         <p>
-          Sponsored listings are off by default. If you turn on “Call the ad network” under Ad
-          preferences, Folio’s server asks the Kevel ad network for one ad and reports that it was
-          shown. That request has no search text and no information about you. If an ad appears, its
-          image loads from Kevel’s servers in your browser, and clicking it goes through Kevel’s
-          click link, so Kevel sees your IP address and browser details at that point. How Kevel
-          uses that information: <Fill>AD PARTNER DATA USE</Fill>. Turn the setting off to stop ads.
+          Folio uses Google AdSense to display advertisements. Google and other third-party
+          advertising vendors may use cookies to serve ads based on your previous visits to this
+          site or other websites. Google’s advertising cookies allow it and its partners to show
+          personalized ads. Ad requests may share your IP address, browser details, and page URL
+          with Google. You can manage personalized advertising through{" "}
+          <Out href="https://myadcenter.google.com/">Google My Ad Center</Out> or opt out of
+          participating third-party vendors through{" "}
+          <Out href="https://www.aboutads.info/choices/">AdChoices</Out>. Read more about{" "}
+          <Out href="https://policies.google.com/technologies/ads">Google’s advertising practices</Out>.
         </p>
 
         <h2 className="pt-2 font-display text-2xl">Links you open</h2>
@@ -239,7 +241,7 @@ function PrivacyPage() {
           <li>Turn Wikipedia, Grokipedia, or Images off so a search skips them.</li>
           <li>Leave AI off so your search is never sent to an AI provider.</li>
           <li>Clear Recent, or clear this site’s data in your browser.</li>
-          <li>Leave sponsored listings off.</li>
+          <li>Manage personalized ads through Google My Ad Center.</li>
           <li>
             Avoid typing personal details into the search box, since searches are sent to the
             services above.

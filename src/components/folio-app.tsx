@@ -6,11 +6,9 @@ import {
   answerWithAi,
   listAiProviders,
   previewHit,
-  requestNetworkAd,
   suggestQueries,
   trendingTopics,
   type HitPreview,
-  type NetworkAd,
   type SearchHit,
   type SearchPayload,
   type SourceId,
@@ -47,7 +45,6 @@ const DEFAULT_SOURCES: Sources = { web: true, wiki: true, grok: true, images: fa
 
 const STORAGE_SOURCES = "folio-sources";
 const STORAGE_RECENT = "folio-recent";
-const STORAGE_ADS = "folio-ads";
 const STORAGE_AI_MODEL = "folio-ai-model";
 
 const SOURCE_META: Record<
@@ -128,15 +125,6 @@ function readAiModel(): string | undefined {
   }
 }
 
-function readAds(): boolean {
-  if (typeof window === "undefined") return false;
-  try {
-    return localStorage.getItem(STORAGE_ADS) === "1";
-  } catch {
-    return false;
-  }
-}
-
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -185,13 +173,6 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(-1);
   const [chrome, setChrome] = useState<"full" | "hidden" | "search">("full");
-  const [adsOn, setAdsOn] = useState(false);
-  const [adsOpen, setAdsOpen] = useState(false);
-
-  useEffect(() => {
-    setAdsOn(readAds());
-  }, []);
-
   useEffect(() => {
     setAiModel(search.ai_model ?? readAiModel());
   }, [search.ai_model]);
@@ -646,14 +627,6 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
             Search the web with Folio by Zip1. Explore web results and optional Wikipedia and Grokipedia sources from
             one simple search interface.
           </p>
-          {adsOn ? <NetworkAd /> : null}
-          <button
-            type="button"
-            onClick={() => setAdsOpen(true)}
-            className="mt-8 min-h-11 text-sm text-muted"
-          >
-            Ad preferences
-          </button>
           {!anySource ? (
             <div className="mt-4 w-full max-w-xl">
               <p className="mb-2 text-sm text-accent">Turn on Web, Wikipedia, Grokipedia, or Images to search.</p>
@@ -693,100 +666,6 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
         </main>
       ) : null}
       <SiteFooter />
-      <AdPreferences
-        open={adsOpen}
-        adsOn={adsOn}
-        onClose={() => setAdsOpen(false)}
-        onChange={(next) => {
-          setAdsOn(next);
-          localStorage.setItem(STORAGE_ADS, next ? "1" : "0");
-        }}
-      />
-    </div>
-  );
-}
-
-function NetworkAd() {
-  const [ad, setAd] = useState<NetworkAd | null | undefined>(undefined);
-
-  useEffect(() => {
-    let cancelled = false;
-    requestNetworkAd({ data: {} })
-      .then((row) => {
-        if (!cancelled) setAd(row);
-      })
-      .catch(() => {
-        if (!cancelled) setAd(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  if (ad === undefined) return <p className="mt-6 text-sm text-muted">Asking the ad network…</p>;
-  if (!ad) return <p className="mt-6 text-sm text-muted">The ad network didn’t return an ad.</p>;
-
-  return (
-    <aside className="mt-6 w-full max-w-xl" aria-label="Paid advertisement">
-      <a href={ad.clickUrl} className="block rounded-2xl border border-line bg-surface px-4 py-3 text-left">
-        <span className="flex items-center gap-2 text-xs tracking-widest text-muted uppercase">
-          <span className="rounded-full bg-accent-soft px-2 py-0.5 font-medium text-accent">Ad</span>
-          <span>{ad.network}</span>
-        </span>
-        {ad.imageUrl ? (
-          <img src={ad.imageUrl} alt="" className="mt-3 max-h-52 w-full rounded-xl object-contain" />
-        ) : null}
-        {ad.text ? <span className="mt-2 block text-sm leading-relaxed text-ink">{ad.text}</span> : null}
-      </a>
-    </aside>
-  );
-}
-
-function AdPreferences({
-  open,
-  adsOn,
-  onClose,
-  onChange,
-}: {
-  open: boolean;
-  adsOn: boolean;
-  onClose: () => void;
-  onChange: (next: boolean) => void;
-}) {
-  const titleId = useId();
-  if (!open) return null;
-  return (
-    <div className="fixed inset-0 z-50">
-      <button type="button" aria-label="Close ad preferences" onClick={onClose} className="absolute inset-0 bg-ink/35" />
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        className="absolute top-1/2 left-1/2 w-[min(24rem,calc(100%-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-3xl border border-line bg-surface p-5"
-      >
-        <h2 id={titleId} className="font-display text-2xl">
-          Ad preferences
-        </h2>
-        <p className="mt-2 text-sm leading-relaxed text-muted">
-          Sponsored listings stay off unless you turn them on. Folio asks Kevel for one ad and does not send your search.
-        </p>
-        <label className="mt-4 flex min-h-11 items-start gap-3 text-sm text-ink">
-          <input
-            type="checkbox"
-            className="mt-1 size-4 accent-accent"
-            checked={adsOn}
-            onChange={(event) => onChange(event.target.checked)}
-          />
-          <span>Call the ad network for a sponsored listing</span>
-        </label>
-        <button
-          type="button"
-          onClick={onClose}
-          className="mt-5 inline-flex min-h-11 w-full items-center justify-center rounded-full bg-ink px-4 text-sm font-medium text-bg"
-        >
-          Done
-        </button>
-      </div>
     </div>
   );
 }
