@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
-import { useNavigate, useRouterState } from "@tanstack/react-router";
+import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import { ArrowUp, ArrowUpRight, BookOpen, ChevronDown, ChevronLeft, ChevronRight, Clock, Compass, Globe, ImageIcon, RotateCw, Search, Share, Sparkles, TrendingUp, X } from "lucide-react";
 import type { FolioSearch } from "@/routes/index";
 import {
@@ -620,7 +620,7 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
         <>
         <header className="flex min-h-screen flex-col items-center bg-bg px-4 pt-[18vh]">
           <h1 className="mb-6 max-w-xl text-center font-display text-4xl leading-tight tracking-tight text-ink sm:text-5xl">
-            Folio by Zip1 — Web, Wikipedia & Grokipedia Search
+            Search the web, Wikipedia, and Grokipedia
           </h1>
           <div className="w-full max-w-xl">{searchForm}</div>
           <p className="mt-4 max-w-xl text-center text-sm leading-relaxed text-muted">
@@ -638,11 +638,31 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
           <h2 id="how-folio" className="font-display text-2xl text-ink">
             How Folio works
           </h2>
-          <p className="mt-3 text-sm leading-relaxed text-muted">
-            Submit a query in the search bar. Web results are included. Wikipedia and Grokipedia are optional sources
-            you can turn on or off. Images is optional too and adds a grid of pictures when you switch it on. Every
-            search also includes a short AI answer, with links to the results it used.
-          </p>
+          <div className="mt-3 grid gap-3 text-sm leading-relaxed text-muted">
+            <p>
+              Type a query in the search bar and press the search button. The model menu in that bar chooses which
+              model writes the short AI answer. Every search includes that answer, with numbered links to the results
+              it used. The answer can be wrong or leave things out, so the lists under it are there to check.
+            </p>
+            <p>
+              Web results are included. Wikipedia and Grokipedia start on, and you can turn either one off. Images
+              starts off. Turning it on adds pictures from Bing’s public image results. If Web, Wikipedia, Grokipedia,
+              and Images are all off, the search button stays disabled until one of them is on again. After a search,
+              those switches sit with the search box. On this page they stay hidden until every source is off.
+            </p>
+            <p>
+              Select a result to open a preview in this window. Open page leaves Folio and goes to that address in the
+              same window.{" "}
+              <Link to="/how-to-search" className="text-accent">
+                How to search
+              </Link>{" "}
+              explains the model menu, pages, and previews.{" "}
+              <Link to="/about" className="text-accent">
+                About Folio
+              </Link>{" "}
+              explains what this site is and what it is not.
+            </p>
+          </div>
         </section>
         </>
       )}

@@ -25,7 +25,7 @@ function HowToSearchPage() {
           Folio
         </Link>
       </p>
-      <h1 className="font-display text-4xl leading-tight tracking-tight text-ink">{TITLE}</h1>
+      <h1 className="font-display text-4xl leading-tight tracking-tight text-ink">Using Folio to search</h1>
       <div className="mt-6 grid gap-4 text-sm leading-relaxed text-ink">
         <p>
           Start in the search box on the Folio home page. Type a query and press the search button, or press Enter.

@@ -25,7 +25,7 @@ function AboutPage() {
           Folio
         </Link>
       </p>
-      <h1 className="font-display text-4xl leading-tight tracking-tight text-ink">{TITLE}</h1>
+      <h1 className="font-display text-4xl leading-tight tracking-tight text-ink">What Folio by Zip1 is</h1>
       <div className="mt-6 grid gap-4 text-sm leading-relaxed text-ink">
         <p>
           Folio by Zip1 is the search page at this site. You type a query and Folio lists matches from the public web.
