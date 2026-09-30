@@ -39,20 +39,18 @@ function AboutPage() {
         </p>
         <p>
           Web, Wikipedia, and Grokipedia start switched on. Images starts off and adds a grid of pictures from Bing’s
-          public image results when you turn it on. AI starts off too. When you turn it on, a short answer sits above the
-          lists, with numbered links to the results it used. It is written from the top results of every source that
-          is on by the provider you pick: Grok from xAI, ChatGPT from OpenAI, or Claude from Anthropic. It is labeled
-          as AI-generated and can be wrong. Wikipedia, Grokipedia, Images, and AI are marked optional. You can turn
-          any source on or off, and this browser remembers the choice. If every source is off, Folio does not run a
-          search. The search button stays disabled, and the home page asks you to turn Web, Wikipedia, Grokipedia, or
-          Images on again.
+          public image results when you turn it on. Every search includes a short AI answer above the lists, with
+          numbered links to the results it used. It is written from the top results of every source that is on by the
+          model you pick in the search bar. It is labeled as AI-generated and can be wrong. Wikipedia, Grokipedia, and
+          Images are marked optional. You can turn any of those sources on or off, and this browser remembers the
+          choice. If every source is off, Folio does not run a search. The search button stays disabled, and the home
+          page asks you to turn Web, Wikipedia, Grokipedia, or Images on again.
         </p>
         <p>
           When a search runs, each source that is on has its own list. If Wikipedia returns a first article, a short
           card can sit beside the lists. If Wikipedia is off and Grokipedia has a first result, that card can come from
-          Grokipedia instead. The side of the results can also show a few references taken from the lists, place names
-          when a location is found, and short definitions for words in the query. Those blocks show up only when the
-          lookup returns them.
+          Grokipedia instead. The side of the results can also show place names when a location is found, and short
+          definitions for words in the query. Those blocks show up only when the lookup returns them.
         </p>
         <p>
           Select a result to open a preview. On a wide screen the panel sits at the side. On a narrow screen it sits

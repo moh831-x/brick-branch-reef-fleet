@@ -3,7 +3,7 @@ import { SiteFooter } from "@/components/site-footer";
 
 const TITLE = "How to search with Folio by Zip1";
 const DESCRIPTION =
-  "How to use Folio: enter a query, switch Web, Wikipedia, Grokipedia, Images, and AI on or off, open a result, and move between pages.";
+  "How to use Folio: enter a query, switch Web, Wikipedia, Grokipedia, and Images on or off, open a result, and move between pages.";
 const CANONICAL = "https://www.zip1.ai/how-to-search";
 
 export const Route = createFileRoute("/how-to-search")({
@@ -32,17 +32,16 @@ function HowToSearchPage() {
           The button stays disabled while the box is empty, so an empty search does not run.
         </p>
         <p>
-          Five switches choose the sources: Web, Wikipedia, Grokipedia, Images, and AI. Web, Wikipedia, and
-          Grokipedia start on. Images and AI start off. Wikipedia, Grokipedia, Images, and AI are marked optional.
+          Four switches choose the sources: Web, Wikipedia, Grokipedia, and Images. Web, Wikipedia, and
+          Grokipedia start on. Images starts off. Wikipedia, Grokipedia, and Images are marked optional.
           After you search, the switches sit with the search box. On the home page they stay hidden until every source is off. Then they
           appear under the message “Turn on Web, Wikipedia, Grokipedia, or Images to search.”
         </p>
         <p>
           Turning a switch off removes that source from the search. This browser stores the choice. If Web,
           Wikipedia, Grokipedia, and Images are all off, Folio does not fetch results, and the search button will not
-          submit. AI does not count here, because it only works from the other sources’ results. Turn at least one source back on.
-          If you are already on a results page and you switch the last source off, those source lists are no longer
-          shown.
+          submit. Turn at least one source back on. If you are already on a results page and you switch the last
+          source off, those source lists are no longer shown.
         </p>
         <p>
           Focus the box before two characters are typed and Folio can show recent searches from this browser plus a
@@ -61,20 +60,19 @@ function HowToSearchPage() {
           a page and goes up to 10 pages, with its own page controls like the other groups.
         </p>
         <p>
-          Turn on AI to add a short answer at the top of the results. Folio waits for the other sources, then sends
-          your search and the top results from every source that is on to the AI provider you picked, which writes a
-          few sentences from them. For Web, Wikipedia, and Grokipedia that means titles, snippets, and addresses. For
-          Images it means each picture’s title and the page it was found on. Numbers in the answer link to the
-          results it used, and the list under it opens each one in a new tab. The card is labeled as AI-generated
-          because it can be wrong or leave things out, so check the sources. The other results show while the answer
-          is written. Your search goes to an AI provider only when AI is on.
+          Every search adds a short answer at the top of the results. Folio waits for the other sources, then sends
+          your search and the top results from every source that is on to the model you picked in the search bar,
+          which writes a few sentences from them. For Web, Wikipedia, and Grokipedia that means titles, snippets, and
+          addresses. For Images it means each picture’s title and the page it was found on. Numbers in the answer
+          link to the results it used, and the list under it opens each one in a new tab. The card is labeled as
+          AI-generated because it can be wrong or leave things out, so check the sources. The other results show
+          while the answer is written.
         </p>
         <p>
-          When AI is on, the card has three choices: Grok (from xAI), ChatGPT (from OpenAI), and Claude (from
-          Anthropic). A choice that this copy of Folio has not connected is grayed out and says not set up. The first
-          one that is set up is picked for you, in that order. This browser remembers your pick, and it is also part
-          of the page address. If the provider you picked does not answer, Folio asks the next one that is set up, and
-          the note under the answer says which one wrote it.
+          The model menu is inside the search bar. A model this copy of Folio cannot run is shown but cannot be
+          picked. This browser remembers your pick, and it is also part of the page address. If the model you picked
+          does not answer, Folio asks the next one that is set up, and the note under the answer says which one
+          wrote it.
         </p>
         <p>
           Click the title or text of a result to open a preview panel. Close it with Escape or the close control.

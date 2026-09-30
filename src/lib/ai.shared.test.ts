@@ -2,14 +2,19 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   AI_MAX_CONTEXT,
+  aiChoiceOf,
   aiProviderOf,
   aiProviderOrder,
   buildAiPrompt,
   cleanContextItem,
+  modelNote,
+  modelReady,
   parseAiAnswer,
   pickAiContext,
+  selectedAiModel,
   selectedAiProvider,
   type AiContextItem,
+  type AiKeyFlags,
 } from "./ai.shared.ts";
 
 const hit = (n: number, host = "example.com") => ({ title: `Title ${n}`, url: `https://${host}/${n}`, snippet: `Snippet ${n}` });
@@ -66,7 +71,26 @@ describe("AI providers", () => {
     assert.equal(aiProviderOf("OpenAI"), "openai");
     assert.equal(aiProviderOf("claude"), "claude");
     assert.equal(aiProviderOf("gemini"), undefined);
+    assert.equal(aiChoiceOf("grok-4.7"), "grok-4.7");
+    assert.equal(aiChoiceOf("Claude"), "claude");
+    assert.equal(aiChoiceOf("nope"), undefined);
     assert.equal(aiProviderOf(undefined), undefined);
+  });
+
+  it("keeps a model the reader can run, and maps an old provider id to that provider's default", () => {
+    const keys: AiKeyFlags = { grok: true, openai: false, claude: false, gateway: true };
+    assert.equal(modelReady({ id: "grok-4.7", label: "Grok 4.7", provider: "grok", direct: "grok-4.7" }, keys), true);
+    assert.equal(
+      modelReady(
+        { id: "claude-sonnet-5.5", label: "Claude", provider: "claude", direct: "claude-sonnet-5-5", gateway: "anthropic/claude-sonnet-5.5", paidGateway: true },
+        keys,
+      ),
+      false,
+    );
+    assert.equal(modelNote({ id: "claude-sonnet-5.5", label: "Claude", provider: "claude", gateway: "x", paidGateway: true }, keys), "needs a paid plan");
+    assert.equal(selectedAiModel("grok-4.7", ["grok-4.3", "grok-4.7", "gpt-4.1-mini"]), "grok-4.7");
+    assert.equal(selectedAiModel("openai", ["grok-4.3", "gpt-4.1-mini", "gpt-4o-mini"]), "gpt-4.1-mini");
+    assert.equal(selectedAiModel(undefined, ["gpt-4o-mini", "grok-4.3"]), "grok-4.3");
   });
 
   it("defaults to the first set-up provider in the order Grok, ChatGPT, Claude", () => {

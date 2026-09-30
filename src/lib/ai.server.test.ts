@@ -5,6 +5,7 @@ import {
   aiProviderStatus,
   availableAiProviders,
   buildProviderRequest,
+  configForModel,
   readProviderConfig,
   readProviderResponse,
   runAiAnswer,
@@ -88,6 +89,10 @@ describe("provider config", () => {
     // A provider's own key still talks to that provider, not the gateway.
     assert.equal(readProviderConfig("claude", { ...env, ANTHROPIC_API_KEY: "a-key" })?.baseUrl, "https://api.anthropic.com/v1");
     assert.ok(!JSON.stringify(aiProviderStatus(env)).includes("gateway-key"));
+    assert.equal(configForModel("claude-sonnet-5.5", env), null);
+    assert.equal(configForModel("gpt-4o-mini", env)?.model, "openai/gpt-4o-mini");
+    assert.equal(configForModel("gemini-2.5-flash-lite", env)?.model, "google/gemini-2.5-flash-lite");
+    assert.equal(configForModel("grok-4.7", { XAI_API_KEY: "x-key" })?.model, "grok-4.7");
   });
 
   it("reports availability and models but never keys", () => {
@@ -154,6 +159,14 @@ describe("runAiAnswer", () => {
     const answer = await runAiAnswer("dogs", context, undefined, { env: {}, fetcher });
     assert.equal(answer.status, "unconfigured");
     assert.equal(calls.length, 0);
+  });
+
+  it("asks the chosen model instead of the provider default", async () => {
+    const { fetcher, calls } = fakeFetch();
+    const answer = await runAiAnswer("dogs", context, "grok-4.7", { env: ALL, fetcher });
+    assert.equal(answer.status, "ok");
+    assert.equal(calls[0].body.model, "grok-4.7");
+    assert.equal(calls.length, 1);
   });
 
   it("asks only the picked provider when it answers", async () => {

@@ -58,6 +58,9 @@ describe("readBotSearch ai_model", () => {
     const picked = read("q=dogs&ai=1&ai_model=claude");
     assert.ok(!("error" in picked));
     assert.equal(picked.aiModel, "claude");
+    const model = read("q=dogs&ai=1&ai_model=grok-4.7");
+    assert.ok(!("error" in model));
+    assert.equal(model.aiModel, "grok-4.7");
     const unknown = read("q=dogs&ai=1&ai_model=nope");
     assert.ok(!("error" in unknown));
     assert.equal(unknown.aiModel, undefined);

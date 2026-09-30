@@ -124,15 +124,16 @@ function PrivacyPage() {
           <span className="font-mono">/?q=…</span>), so it appears in your browser history and in
           the address you share if you copy the link. The public search endpoint at{" "}
           <span className="font-mono">/api/search</span> works the same way. The query is in the
-          address, and results come from the same services. It sends the query to an AI provider only
-          when the address asks for an AI answer (<span className="font-mono">ai=1</span>).
+          address, and results come from the same services. The website asks an AI provider for a short answer on
+          every search. The public search endpoint sends the query to an AI provider only when the address asks for
+          an AI answer (<span className="font-mono">ai=1</span>).
         </p>
 
         <h2 className="pt-2 font-display text-2xl">What stays in your browser</h2>
         <p>Folio keeps four items in your browser’s local storage for this site:</p>
         <ul className="grid list-disc gap-2 pl-5">
           <li>which sources you turned on or off;</li>
-          <li>which AI provider you picked, if you picked one;</li>
+          <li>which AI model you picked, if you picked one;</li>
           <li>your last six searches, shown under Recent;</li>
           <li>whether you turned sponsored listings on.</li>
         </ul>

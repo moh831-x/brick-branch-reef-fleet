@@ -13,15 +13,23 @@
  */
 import {
   AI_MESSAGES,
+  AI_MODELS,
   AI_PROVIDERS,
   AI_SYSTEM_PROMPT,
+  aiModelOf,
+  aiProviderOf,
   aiProviderOrder,
   buildAiPrompt,
+  modelNote,
+  modelReady,
   parseAiAnswer,
   type AiAnswer,
   type AiContextItem,
+  type AiKeyFlags,
+  type AiModelStatus,
   type AiProviderId,
   type AiProviderStatus,
+  type AnswerProviderId,
 } from "./ai.shared.ts";
 
 type Env = Record<string, string | undefined>;
@@ -91,7 +99,7 @@ const AI_GATEWAY_MODELS = {
 } as const;
 
 export type ProviderConfig = {
-  id: AiProviderId;
+  id: AnswerProviderId;
   api: ProviderSpec["api"];
   apiKey: string;
   baseUrl: string;
@@ -132,6 +140,40 @@ export function aiProviderStatus(env: Env = process.env): AiProviderStatus[] {
     const config = readProviderConfig(provider.id, env);
     return { id: provider.id, label: provider.label, available: Boolean(config), ...(config ? { model: config.model } : {}) };
   });
+}
+
+export function aiKeyFlags(env: Env = process.env): AiKeyFlags {
+  return {
+    grok: Boolean(env.XAI_API_KEY?.trim()),
+    openai: Boolean(env.OPENAI_API_KEY?.trim()),
+    claude: Boolean(env.ANTHROPIC_API_KEY?.trim()),
+    gateway: Boolean(env.AI_GATEWAY_API_KEY?.trim()),
+  };
+}
+
+/** Which listed models can run with the keys on this server. Never includes the keys. */
+export function aiModelStatus(env: Env = process.env): AiModelStatus[] {
+  const keys = aiKeyFlags(env);
+  return AI_MODELS.map((spec) => {
+    const note = modelNote(spec, keys);
+    return { id: spec.id, label: spec.label, provider: spec.provider, available: !note, ...(note ? { note } : {}) };
+  });
+}
+
+/** Config for one menu model, using the provider's own key when it has one and the gateway otherwise. */
+export function configForModel(modelId: string, env: Env = process.env): ProviderConfig | null {
+  const spec = AI_MODELS.find((model) => model.id === modelId);
+  if (!spec || !modelReady(spec, aiKeyFlags(env))) return null;
+  if (spec.provider === "gemini") {
+    const apiKey = env.AI_GATEWAY_API_KEY?.trim();
+    if (!apiKey || !spec.gateway) return null;
+    return { id: "gemini", api: "chat", apiKey, baseUrl: AI_GATEWAY_BASE, model: spec.gateway, gateway: true };
+  }
+  const base = readProviderConfig(spec.provider, env);
+  if (!base) return null;
+  const model = base.gateway ? spec.gateway : spec.direct;
+  if (!model) return null;
+  return { ...base, model, effort: undefined };
 }
 
 type Request = { url: string; init: RequestInit };
@@ -218,26 +260,39 @@ async function askProvider(config: ProviderConfig, query: string, context: AiCon
 export async function runAiAnswer(
   query: string,
   context: AiContextItem[],
-  preferred?: AiProviderId,
+  preferred?: string,
   options: { env?: Env; fetcher?: typeof fetch } = {},
 ): Promise<AiAnswer> {
   const env = options.env ?? process.env;
   const fetcher = options.fetcher ?? fetch;
-  const order = aiProviderOrder(preferred, availableAiProviders(env));
-  if (!order.length) return { status: "unconfigured", message: AI_MESSAGES.unconfigured };
+  const modelId = aiModelOf(preferred);
+  const pickedProvider = modelId ? AI_MODELS.find((model) => model.id === modelId)?.provider : undefined;
+  const providerPref = pickedProvider && pickedProvider !== "gemini" ? pickedProvider : aiProviderOf(preferred);
+  const order = aiProviderOrder(providerPref, availableAiProviders(env));
+  const queue: ProviderConfig[] = [];
+  const seen = new Set<string>();
+  const push = (config: ProviderConfig | null) => {
+    if (!config) return;
+    const key = `${config.id}:${config.model}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    queue.push(config);
+  };
+  if (modelId) push(configForModel(modelId, env));
+  for (const id of order) push(readProviderConfig(id, env));
+  if (!queue.length) return { status: "unconfigured", message: AI_MESSAGES.unconfigured };
   if (!context.length) return { status: "no-context", message: AI_MESSAGES.noContext };
 
-  const failed: AiProviderId[] = [];
-  for (const id of order) {
-    const config = readProviderConfig(id, env);
-    if (!config) continue;
+  const failed: AnswerProviderId[] = [];
+  for (const config of queue) {
     try {
       const answer = await askProvider(config, query, context, fetcher);
-      return { status: "ok", ...answer, provider: id, ...(preferred ? { requested: preferred } : {}), failed };
+      const requested = pickedProvider ?? providerPref;
+      return { status: "ok", ...answer, provider: config.id, ...(requested ? { requested } : {}), failed };
     } catch (error) {
       const reason = error instanceof Error ? error.message.slice(0, 40) : "unknown";
-      console.error(`[ai] ${id} failed (${reason})`);
-      failed.push(id);
+      console.error(`[ai] ${config.id} ${config.model} failed (${reason})`);
+      if (!failed.includes(config.id)) failed.push(config.id);
     }
   }
   return { status: "error", message: AI_MESSAGES.error, failed };

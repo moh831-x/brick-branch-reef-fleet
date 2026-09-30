@@ -1,4 +1,4 @@
-import { aiProviderOf, type AiProviderId } from "./ai.shared.ts";
+import { aiChoiceOf } from "./ai.shared.ts";
 
 export const PAGE = 8;
 export const WEB_PAGE = 10;
@@ -32,8 +32,8 @@ export type BotSearchQuery = {
   images: boolean;
   /** Optional AI answer built from the top Web, Wikipedia, and Grokipedia results. Off unless asked for. */
   ai: boolean;
-  /** Preferred AI provider (`ai_model=grok|openai|claude`). Unset means the first one that is set up. */
-  aiModel?: AiProviderId;
+  /** Preferred model id, or a legacy provider id (`ai_model=grok-4.3` or `ai_model=claude`). */
+  aiModel?: string;
   webOffset: number;
   wikiOffset: number;
   grokOffset: number;
@@ -71,7 +71,7 @@ export function readBotSearch(params: URLSearchParams): BotSearchQuery | { error
     grok,
     images,
     ai,
-    aiModel: aiProviderOf(params.get("ai_model")),
+    aiModel: aiChoiceOf(params.get("ai_model")),
     webOffset: pageOffset(params.get("webPage"), WEB_PAGE),
     wikiOffset: pageOffset(params.get("wikiPage"), PAGE),
     grokOffset: pageOffset(params.get("grokPage"), GROK_PAGE),

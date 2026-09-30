@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { GROK_PAGE, IMAGES_PAGE, MAX_PAGE, PAGE, WEB_PAGE } from "./search.shared";
-import { AI_MAX_CONTEXT, aiProviderOf, cleanContextItem, type AiAnswer, type AiContextItem, type AiProviderStatus } from "./ai.shared";
-import { aiProviderStatus, runAiAnswer } from "./ai.server";
+import { AI_MAX_CONTEXT, aiChoiceOf, cleanContextItem, type AiAnswer, type AiContextItem, type AiModelStatus } from "./ai.shared";
+import { aiModelStatus, runAiAnswer } from "./ai.server";
 import { runNetworkAd, runPreview, runSearch, runSuggest, runTrending, type HitPreview, type NetworkAd, type SearchInput, type SearchPayload, type SourceId, type Suggestion, type Trend } from "./search.server";
 
 export type { HitPreview, ImageRef, LeadCard, NetworkAd, PlaceRef, SearchHit, SearchInput, SearchPayload, SourceBlock, SourceId, Suggestion, Trend, WordDefinition, WordSense } from "./search.server";
@@ -60,14 +60,14 @@ export const answerWithAi = createServerFn({ method: "POST" })
       seen.add(clean.url);
       context.push(clean);
     }
-    return { q, context, provider: aiProviderOf(raw.provider) };
+    return { q, context, model: aiChoiceOf(raw.model) };
   })
-  .handler(async ({ data }): Promise<AiAnswer> => runAiAnswer(data.q, data.context, data.provider));
+  .handler(async ({ data }): Promise<AiAnswer> => runAiAnswer(data.q, data.context, data.model));
 
-/** Which AI providers have a key on the server, for the provider selector. No keys are returned. */
+/** Which AI models can run with the keys on the server, for the model menu. No keys are returned. */
 export const listAiProviders = createServerFn({ method: "POST" })
   .validator(() => ({}))
-  .handler(async (): Promise<AiProviderStatus[]> => aiProviderStatus());
+  .handler(async (): Promise<AiModelStatus[]> => aiModelStatus());
 
 export const suggestQueries = createServerFn({ method: "POST" })
   .validator((input: unknown) => {

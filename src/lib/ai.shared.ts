@@ -9,11 +9,21 @@ export type AiSourceId = "web" | "wiki" | "grok" | "images";
 /** The AI providers Folio can ask, in fallback order. The id is what goes in the address (`ai_model=`). */
 export type AiProviderId = "grok" | "openai" | "claude";
 
+/** Gemini is gateway-only and is not part of the provider fallback order. */
+export type AnswerProviderId = AiProviderId | "gemini";
+
 export const AI_PROVIDERS: ReadonlyArray<{ id: AiProviderId; label: string; company: string }> = [
   { id: "grok", label: "Grok", company: "xAI" },
   { id: "openai", label: "ChatGPT", company: "OpenAI" },
   { id: "claude", label: "Claude", company: "Anthropic" },
 ];
+
+const ANSWER_LABEL: Record<AnswerProviderId, string> = {
+  grok: "Grok",
+  openai: "ChatGPT",
+  claude: "Claude",
+  gemini: "Gemini",
+};
 
 export function aiProviderOf(value: unknown): AiProviderId | undefined {
   if (typeof value !== "string") return undefined;
@@ -21,8 +31,8 @@ export function aiProviderOf(value: unknown): AiProviderId | undefined {
   return AI_PROVIDERS.some((provider) => provider.id === id) ? (id as AiProviderId) : undefined;
 }
 
-export function aiProviderLabel(id: AiProviderId): string {
-  return AI_PROVIDERS.find((provider) => provider.id === id)?.label ?? id;
+export function aiProviderLabel(id: AnswerProviderId): string {
+  return ANSWER_LABEL[id] ?? id;
 }
 
 /**
@@ -39,6 +49,91 @@ export function aiProviderOrder(preferred: AiProviderId | undefined, available: 
 export function selectedAiProvider(preferred: AiProviderId | undefined, available: readonly AiProviderId[]): AiProviderId | undefined {
   return aiProviderOrder(preferred, available)[0];
 }
+
+/** A model the reader can pick. `direct` is the provider's own API id; `gateway` is the Vercel AI Gateway id. */
+export type AiModelSpec = {
+  id: string;
+  label: string;
+  provider: AnswerProviderId;
+  direct?: string;
+  gateway?: string;
+  /** Free AI Gateway plans reject this model. A provider's own key can still use `direct`. */
+  paidGateway?: boolean;
+};
+
+export const AI_MODELS: readonly AiModelSpec[] = [
+  { id: "grok-4.7", label: "Grok 4.7", provider: "grok", direct: "grok-4.7" },
+  { id: "grok-4.6", label: "Grok 4.6", provider: "grok", direct: "grok-4.6" },
+  { id: "grok-4.3", label: "Grok 4.3", provider: "grok", direct: "grok-4.3" },
+  { id: "gpt-4.1-mini", label: "GPT-4.1 mini", provider: "openai", direct: "gpt-4.1-mini", gateway: "openai/gpt-4.1-mini" },
+  { id: "gpt-4o-mini", label: "GPT-4o mini", provider: "openai", direct: "gpt-4o-mini", gateway: "openai/gpt-4o-mini" },
+  { id: "gemini-2.5-flash-lite", label: "Gemini 2.5 Flash Lite", provider: "gemini", gateway: "google/gemini-2.5-flash-lite" },
+  {
+    id: "claude-sonnet-5.5",
+    label: "Claude Sonnet 5.5",
+    provider: "claude",
+    direct: "claude-sonnet-5-5",
+    gateway: "anthropic/claude-sonnet-5.5",
+    paidGateway: true,
+  },
+];
+
+const DEFAULT_MODEL: Record<AiProviderId, string> = {
+  grok: "grok-4.3",
+  openai: "gpt-4.1-mini",
+  claude: "claude-sonnet-5.5",
+};
+
+export type AiKeyFlags = { grok: boolean; openai: boolean; claude: boolean; gateway: boolean };
+
+export function aiModelOf(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const id = value.trim().toLowerCase();
+  return AI_MODELS.some((model) => model.id === id) ? id : undefined;
+}
+
+/** A model id, or a legacy provider id (`grok`, `openai`, `claude`). Unknown values are dropped. */
+export function aiChoiceOf(value: unknown): string | undefined {
+  return aiModelOf(value) ?? aiProviderOf(value);
+}
+
+export function modelReady(spec: AiModelSpec, keys: AiKeyFlags): boolean {
+  if (spec.provider === "gemini") return keys.gateway && Boolean(spec.gateway);
+  if (spec.provider === "grok") return keys.grok && Boolean(spec.direct);
+  const own = spec.provider === "openai" ? keys.openai : keys.claude;
+  if (own && spec.direct) return true;
+  return !own && keys.gateway && Boolean(spec.gateway) && !spec.paidGateway;
+}
+
+export function modelNote(spec: AiModelSpec, keys: AiKeyFlags): string | undefined {
+  if (modelReady(spec, keys)) return undefined;
+  if (spec.paidGateway && keys.gateway && !(spec.provider === "claude" ? keys.claude : false)) return "needs a paid plan";
+  return "not set up";
+}
+
+/** The reader's model when it can run, otherwise that provider's default, otherwise the first model that can run. */
+export function selectedAiModel(preferred: string | undefined, available: readonly string[]): string | undefined {
+  if (preferred && available.includes(preferred)) return preferred;
+  const provider = aiProviderOf(preferred);
+  if (provider) {
+    const fallback = DEFAULT_MODEL[provider];
+    if (available.includes(fallback)) return fallback;
+    const any = AI_MODELS.find((model) => model.provider === provider && available.includes(model.id));
+    if (any) return any.id;
+  }
+  for (const id of Object.values(DEFAULT_MODEL)) {
+    if (available.includes(id)) return id;
+  }
+  return available[0];
+}
+
+export type AiModelStatus = {
+  id: string;
+  label: string;
+  provider: AnswerProviderId;
+  available: boolean;
+  note?: string;
+};
 
 export type AiProviderStatus = { id: AiProviderId; label: string; available: boolean; model?: string };
 
@@ -69,13 +164,13 @@ export type AiAnswer =
       citations: AiCitation[];
       model: string;
       /** The provider that actually answered. */
-      provider: AiProviderId;
+      provider: AnswerProviderId;
       /** The provider the reader asked for, when there was one. */
-      requested?: AiProviderId;
+      requested?: AnswerProviderId;
       /** Set-up providers that were tried first and failed. */
-      failed: AiProviderId[];
+      failed: AnswerProviderId[];
     }
-  | { status: "unconfigured" | "no-context" | "error"; message: string; failed?: AiProviderId[] };
+  | { status: "unconfigured" | "no-context" | "error"; message: string; failed?: AnswerProviderId[] };
 
 export const AI_MESSAGES = {
   unconfigured: "AI answers aren’t set up yet.",

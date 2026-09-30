@@ -1,7 +1,7 @@
 import { createFileRoute, stripSearchParams } from "@tanstack/react-router";
 import { FolioApp } from "@/components/folio-app";
 import { searchAll } from "@/lib/search.functions";
-import { aiProviderOf, type AiProviderId } from "@/lib/ai.shared";
+import { aiChoiceOf } from "@/lib/ai.shared";
 import { GROK_PAGE, IMAGES_MAX_PAGE, IMAGES_PAGE, PAGE, WEB_PAGE, pageOf } from "@/lib/search.shared";
 
 const HOME_TITLE = "Folio by Zip1 — Web, Wikipedia & Grokipedia Search";
@@ -27,8 +27,8 @@ export type FolioSearch = {
   images?: boolean;
   /** AI is opt-in too: absent means off. It is not a loader dep, because it never changes the search itself. */
   ai?: boolean;
-  /** Preferred AI provider (grok, openai, or claude). Not a loader dep either. */
-  ai_model?: AiProviderId;
+  /** Preferred AI model id, or a legacy provider id. Not a loader dep. */
+  ai_model?: string;
   webPage?: number;
   wikiPage?: number;
   grokPage?: number;
@@ -55,7 +55,7 @@ export const Route = createFileRoute("/")({
     grok: flag(raw.grok),
     images: flag(raw.images),
     ai: flag(raw.ai),
-    ai_model: aiProviderOf(raw.ai_model),
+    ai_model: aiChoiceOf(raw.ai_model),
     webPage: pageOf(raw.webPage),
     wikiPage: pageOf(raw.wikiPage),
     grokPage: pageOf(raw.grokPage),
