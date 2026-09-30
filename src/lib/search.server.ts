@@ -104,13 +104,6 @@ export type Suggestion = {
   source: "wiki" | "grok";
 };
 
-export type NetworkAd = {
-  network: "Kevel";
-  text: string;
-  clickUrl: string;
-  imageUrl?: string;
-};
-
 export type Trend = {
   title: string;
   snippet: string;
@@ -1004,52 +997,6 @@ function tidyTrend(title: string, snippet: string): string {
     if (rest) text = /^[,.;:]/.test(rest) ? `${lead}${rest}` : `${lead} ${rest}`;
   }
   return clip(text, 160);
-}
-
-function allowedAdUrl(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  try {
-    const url = new URL(value);
-    if (url.protocol !== "https:") return null;
-    const host = url.hostname.toLowerCase();
-    const allowed = host === "adzerk.net" || host === "kevel.com" || host === "zkcdn.net" || host.endsWith(".adzerk.net") || host.endsWith(".kevel.com") || host.endsWith(".zkcdn.net");
-    return allowed ? url.toString() : null;
-  } catch {
-    return null;
-  }
-}
-
-export async function runNetworkAd(): Promise<NetworkAd | null> {
-  const response = await fetch("https://e-23.adzerk.net/api/v2", {
-    method: "POST",
-    headers: { Accept: "application/json", "Content-Type": "application/json" },
-    body: JSON.stringify({
-      placements: [{ divName: "folio", networkId: 23, siteId: 667480, adTypes: [5] }],
-    }),
-    signal: AbortSignal.timeout(8000),
-  });
-  if (!response.ok) return null;
-  const data = (await response.json()) as {
-    decisions?: {
-      folio?: {
-        clickUrl?: string;
-        impressionUrl?: string;
-        contents?: Array<{ body?: string; data?: { title?: string; imageUrl?: string } }>;
-      };
-    };
-  };
-  const decision = data.decisions?.folio;
-  const content = decision?.contents?.[0];
-  const clickUrl = allowedAdUrl(decision?.clickUrl);
-  const imageUrl = allowedAdUrl(content?.data?.imageUrl) ?? undefined;
-  const rawText = content?.data?.title || (content?.body ?? "").replace(/<[^>]+>/g, " ");
-  const text = clip(decodeEntities(rawText), 180);
-  if (!decision || !clickUrl || (!text && !imageUrl)) return null;
-  const impression = allowedAdUrl(decision.impressionUrl);
-  if (impression) {
-    await fetch(impression, { signal: AbortSignal.timeout(4000) }).catch(() => undefined);
-  }
-  return { network: "Kevel", text, clickUrl, imageUrl };
 }
 
 let trendCache: { at: number; rows: Trend[] } | null = null;

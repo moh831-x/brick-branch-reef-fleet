@@ -2,9 +2,9 @@ import { createServerFn } from "@tanstack/react-start";
 import { GROK_PAGE, IMAGES_PAGE, MAX_PAGE, PAGE, WEB_PAGE } from "./search.shared";
 import { AI_MAX_CONTEXT, aiChoiceOf, cleanContextItem, type AiAnswer, type AiContextItem, type AiModelStatus } from "./ai.shared";
 import { aiModelStatus, runAiAnswer } from "./ai.server";
-import { runNetworkAd, runPreview, runSearch, runSuggest, runTrending, type HitPreview, type NetworkAd, type SearchInput, type SearchPayload, type SourceId, type Suggestion, type Trend } from "./search.server";
+import { runPreview, runSearch, runSuggest, runTrending, type HitPreview, type SearchInput, type SearchPayload, type SourceId, type Suggestion, type Trend } from "./search.server";
 
-export type { HitPreview, ImageRef, LeadCard, NetworkAd, PlaceRef, SearchHit, SearchInput, SearchPayload, SourceBlock, SourceId, Suggestion, Trend, WordDefinition, WordSense } from "./search.server";
+export type { HitPreview, ImageRef, LeadCard, PlaceRef, SearchHit, SearchInput, SearchPayload, SourceBlock, SourceId, Suggestion, Trend, WordDefinition, WordSense } from "./search.server";
 
 function bool(value: unknown, fallback: boolean): boolean {
   if (typeof value === "boolean") return value;
@@ -76,10 +76,6 @@ export const suggestQueries = createServerFn({ method: "POST" })
     return { q };
   })
   .handler(async ({ data }): Promise<Suggestion[]> => runSuggest(data.q));
-
-export const requestNetworkAd = createServerFn({ method: "POST" })
-  .validator(() => ({}))
-  .handler(async (): Promise<NetworkAd | null> => runNetworkAd());
 
 export const trendingTopics = createServerFn({ method: "POST" })
   .validator(() => ({}))
