@@ -1,5 +1,6 @@
 import { GROK_PAGE, IMAGES_MAX_PAGE, IMAGES_PAGE, isLatinQuery, PAGE, relevantCount, WEB_PAGE } from "./search.shared";
 import { LANGS, langInfo, matchLang, wikiOrigin as wikiOriginFor, type UiLang } from "./i18n";
+import { extractReadable, isPrivateHost, pageCharset, type ReaderPage } from "./reader";
 
 export type SourceId = "web" | "wiki" | "grok" | "images";
 
@@ -121,6 +122,8 @@ export type HitPreview = {
   url: string;
   image?: string;
   sections?: PreviewSection[];
+  /** Web results only: "ok" when the page itself was read, "unavailable" when it could not be (blocked, timeout, not HTML). */
+  reader?: "ok" | "unavailable";
 };
 
 export type Suggestion = {
@@ -1310,6 +1313,97 @@ function articleParts(raw: string, kind: "wiki" | "md"): { lead: string; section
   return { lead: plainClip(leadLines.join(" "), 700), sections };
 }
 
+/* ---------- Reader view for web results ---------- */
+
+const READER_TIMEOUT_MS = 7000;
+const READER_MAX_BYTES = 2_000_000;
+const READER_MAX_REDIRECTS = 4;
+const READER_UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36 Folio/1.0";
+const readerCache = new Map<string, { at: number; page: ReaderPage | null }>();
+
+/** Refuse anything but public http(s) addresses on the default ports (no localhost, private ranges, or metadata IPs). */
+async function assertPublicUrl(raw: string): Promise<URL> {
+  const url = new URL(raw);
+  if (url.protocol !== "https:" && url.protocol !== "http:") throw new Error("unsupported address");
+  if (url.username || url.password) throw new Error("unsupported address");
+  if (url.port && url.port !== "80" && url.port !== "443") throw new Error("unsupported port");
+  if (isPrivateHost(url.hostname)) throw new Error("private address");
+  const { lookup } = await import("node:dns/promises");
+  const addresses = await lookup(url.hostname.replace(/^\[|\]$/g, ""), { all: true });
+  if (!addresses.length || addresses.some((row) => isPrivateHost(row.address))) throw new Error("private address");
+  return url;
+}
+
+async function readCapped(response: Response): Promise<Uint8Array> {
+  const reader = response.body?.getReader();
+  if (!reader) return new Uint8Array(await response.arrayBuffer()).slice(0, READER_MAX_BYTES);
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  while (size < READER_MAX_BYTES) {
+    const { done, value } = await reader.read();
+    if (done || !value) break;
+    chunks.push(value);
+    size += value.byteLength;
+  }
+  void reader.cancel().catch(() => undefined);
+  const out = new Uint8Array(Math.min(size, READER_MAX_BYTES));
+  let at = 0;
+  for (const chunk of chunks) {
+    const part = chunk.subarray(0, Math.max(0, out.length - at));
+    out.set(part, at);
+    at += part.length;
+    if (at >= out.length) break;
+  }
+  return out;
+}
+
+/** Fetch a web result's page and pull out its readable text and headings. Null when it cannot be read. */
+async function readWebPage(raw: string): Promise<ReaderPage | null> {
+  const cached = readerCache.get(raw);
+  if (cached && Date.now() - cached.at < 15 * 60 * 1000) return cached.page;
+  let page: ReaderPage | null = null;
+  try {
+    const deadline = AbortSignal.timeout(READER_TIMEOUT_MS);
+    let url = await assertPublicUrl(raw);
+    let response: Response | null = null;
+    for (let hop = 0; hop <= READER_MAX_REDIRECTS; hop += 1) {
+      response = await fetch(url, {
+        headers: { Accept: "text/html,application/xhtml+xml;q=0.9,*/*;q=0.5", "Accept-Language": "en;q=0.8,*;q=0.5", "User-Agent": READER_UA },
+        redirect: "manual",
+        signal: deadline,
+      });
+      const next = response.status >= 300 && response.status < 400 ? response.headers.get("location") : null;
+      if (!next) break;
+      void response.body?.cancel().catch(() => undefined);
+      url = await assertPublicUrl(new URL(next, url).toString());
+      response = null;
+    }
+    if (response?.ok && /html|xml/i.test(response.headers.get("content-type") ?? "")) {
+      const bytes = await readCapped(response);
+      const sniff = new TextDecoder("latin1").decode(bytes.subarray(0, 4096));
+      let html: string;
+      try {
+        html = new TextDecoder(pageCharset(response.headers.get("content-type"), sniff)).decode(bytes);
+      } catch {
+        html = new TextDecoder("utf-8").decode(bytes);
+      }
+      const parsed = extractReadable(html, url.toString());
+      if (parsed.lead.length >= 60 || parsed.sections.length > 0) page = parsed;
+    } else if (response) {
+      void response.body?.cancel().catch(() => undefined);
+    }
+  } catch {
+    page = null;
+  }
+  readerCache.set(raw, { at: Date.now(), page });
+  if (readerCache.size > 200) {
+    const oldest = readerCache.keys().next().value;
+    if (oldest) readerCache.delete(oldest);
+  }
+  return page;
+}
+
 function previewFallback(input: { source: SourceId; title: string; url: string; snippet: string }): HitPreview {
   const url = safeHttp(input.url) ?? input.url;
   return {
@@ -1363,6 +1457,21 @@ export async function runPreview(input: {
         url: safeHttp(data.content_urls?.desktop?.page ?? "") ?? fallback.url,
         image: wikiImage(data.thumbnail?.source),
         ...(sections.length ? { sections } : {}),
+      };
+    }
+    if (input.source === "web") {
+      const page = await readWebPage(fallback.url);
+      if (!page) return { ...fallback, reader: "unavailable" };
+      const sections = page.sections.filter((section) => section.title);
+      return {
+        source: "web",
+        title: page.title || input.title,
+        kicker: page.siteName || fallback.kicker,
+        extract: page.lead || fallback.extract,
+        url: fallback.url,
+        ...(page.image ? { image: page.image } : {}),
+        ...(sections.length ? { sections } : {}),
+        reader: "ok",
       };
     }
     if (input.source === "grok") {
