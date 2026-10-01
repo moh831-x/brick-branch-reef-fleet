@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
-import { createFileRoute, Link } from "@tanstack/react-router";
-import { SiteFooter } from "@/components/site-footer";
+import { createFileRoute } from "@tanstack/react-router";
+import { DocPage } from "@/components/doc-page-chrome";
 
 const TITLE = "Privacy policy";
 const DESCRIPTION =
@@ -30,16 +30,7 @@ function Out({ href, children }: { href: string; children: ReactNode }) {
 
 function PrivacyPage() {
   return (
-    <main className="mx-auto min-h-screen max-w-2xl px-4 pt-12">
-      <p className="mb-8">
-        <Link
-          to="/"
-          search={{ q: "", near: "" }}
-          className="font-display text-2xl tracking-tight text-ink"
-        >
-          Folio
-        </Link>
-      </p>
+    <DocPage>
       <h1 className="font-display text-4xl leading-tight tracking-tight text-ink">{TITLE}</h1>
       <p className="mt-2 text-sm text-muted">
         Effective <Fill>EFFECTIVE DATE</Fill>
@@ -126,9 +117,12 @@ function PrivacyPage() {
           <span className="font-mono">/api/search</span> works the same way. The query is in the
           address, and results come from the same services. The website asks an AI provider for a short answer on
           every search. The public search endpoint sends the query to an AI provider only when the address asks for
-          an AI answer (<span className="font-mono">ai=1</span>). If this browser has a preview language other than
-          English, Folio translates the query and sends that translation to Bing and Wikipedia, and asks the AI
-          answer to use the same language. Grokipedia still receives the words you typed.
+          an AI answer (<span className="font-mono">ai=1</span>). If the site language is not English, Folio asks an
+          AI provider to translate the query into that language (sent to that language’s Wikipedia) and into English
+          (sent to Grokipedia, and to Bing with the site language set when the query is not in Latin script). Grokipedia
+          titles and snippets, and the text of a preview you open, are also sent to an AI provider to be translated into
+          the site language. The AI answer is written in the site language. Until you pick a language, Folio reads your browser’s preferred languages (the
+          Accept-Language header it sends with every request) to choose one.
         </p>
 
         <h2 className="pt-2 font-display text-2xl">What stays in your browser</h2>
@@ -136,13 +130,13 @@ function PrivacyPage() {
         <ul className="grid list-disc gap-2 pl-5">
           <li>which sources you turned on or off;</li>
           <li>which AI model you picked, if you picked one;</li>
-          <li>which preview language you picked, if you picked one;</li>
+          <li>which site language you picked, if you picked one;</li>
           <li>which speaking voice you picked for that language, if you picked one;</li>
           <li>your last six searches, shown under Recent;</li>
         </ul>
         <p>
-          These stay on your device. The preview language is also stored in a cookie named{" "}
-          <span className="font-mono">folio_lang</span> so the next search can use it. That cookie is sent to
+          These stay on your device. The site language is also stored in a cookie named{" "}
+          <span className="font-mono">folio_lang</span> so pages and searches load in that language. That cookie is sent to
           Folio’s server. The other saved items are not. To remove them, use Clear next to Recent, or clear
           this site’s data in your browser settings.
         </p>
@@ -259,12 +253,6 @@ function PrivacyPage() {
           with it. Questions or requests: <Fill>CONTACT EMAIL</Fill>.
         </p>
       </div>
-      <p className="mt-8">
-        <Link to="/" search={{ q: "", near: "" }} className="text-sm font-medium text-ink">
-          Back to search
-        </Link>
-      </p>
-      <SiteFooter />
-    </main>
+    </DocPage>
   );
 }

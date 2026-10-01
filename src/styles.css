@@ -103,3 +103,15 @@
     animation: none;
   }
 }
+
+/* Right-to-left pages (Arabic): mirror icons that point along the reading direction. */
+[dir="rtl"] .lucide-arrow-up-right,
+[dir="rtl"] .lucide-chevron-left,
+[dir="rtl"] .lucide-chevron-right {
+  transform: scaleX(-1);
+}
+
+/* Letter spacing breaks up joined Arabic script, so Arabic pages keep normal spacing. */
+html:lang(ar) * {
+  letter-spacing: normal !important;
+}

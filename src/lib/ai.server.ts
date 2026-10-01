@@ -31,6 +31,7 @@ import {
   type AiProviderStatus,
   type AnswerProviderId,
 } from "./ai.shared.ts";
+import { LANGS } from "./i18n.ts";
 
 type Env = Record<string, string | undefined>;
 
@@ -227,7 +228,7 @@ export function buildProviderRequest(config: ProviderConfig, query: string, cont
   };
 }
 
-type ChatCompletion = { model?: string; choices?: Array<{ message?: { content?: string | null } }> };
+type ChatCompletion = { model?: string; choices?: Array<{ finish_reason?: string; message?: { content?: string | null } }> };
 type AnthropicMessage = { model?: string; content?: Array<{ type?: string; text?: string }> };
 
 /** Pull the answer text and model name out of a provider response. Exported for tests. */
@@ -245,11 +246,8 @@ export function readProviderResponse(config: ProviderConfig, body: unknown): { r
   return { raw: completion.choices?.[0]?.message?.content?.trim() ?? "", model: completion.model || config.model };
 }
 
-const TRANSLATE_NAMES: Record<string, string> = {
-  "zh-CN": "Simplified Chinese",
-  "hi-IN": "Hindi",
-  "bn-BD": "Bangla",
-};
+/** Every page language, English included (Grokipedia queries are translated into English). */
+const TRANSLATE_NAMES: Record<string, string> = Object.fromEntries(LANGS.map((item) => [item.code, item.english]));
 
 /** Pull a translation object out of a model reply. Exported for tests. */
 export function readTranslation(raw: string): { title: string; text: string } | null {
@@ -268,44 +266,266 @@ export function readTranslation(raw: string): { title: string; text: string } | 
   }
 }
 
+const TRANSLATE_TIMEOUT_MS = 45_000;
+/** Long passages are split into pieces about this long so every reply fits its token budget. */
+const TRANSLATE_CHUNK_CHARS = 1800;
+/** Pieces translated at the same time. */
+const TRANSLATE_PARALLEL = 5;
+/** A provider that refused or timed out is tried last for this long. */
+const TRANSLATE_COOLDOWN_MS = 5 * 60_000;
+const translateCooldown = new Map<string, number>();
+
 /**
- * Translate a preview title and passage. Uses Grok when that key is set, otherwise the first
- * gateway model that is set up. Throws when nothing is configured or the reply is not usable.
+ * Providers for translation, fastest first: GPT-4.1 mini (own key or AI Gateway), then Grok, then
+ * Gemini Flash Lite on the gateway, then any other chat-style provider that is set up.
+ */
+export function translateConfigs(env: Env = process.env): ProviderConfig[] {
+  const list = [
+    configForModel("gpt-4.1-mini", env),
+    readProviderConfig("grok", env),
+    configForModel("gemini-2.5-flash-lite", env),
+    readProviderConfig("openai", env),
+    readProviderConfig("claude", env),
+  ];
+  const seen = new Set<string>();
+  const out: ProviderConfig[] = [];
+  for (const config of list) {
+    if (!config || config.api !== "chat") continue;
+    const key = `${config.id}:${config.model}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(config);
+  }
+  return out;
+}
+
+function failureReason(error: unknown): string {
+  if (error instanceof Error) {
+    if (error.name === "TimeoutError" || error.name === "AbortError") return "timeout";
+    return error.message.slice(0, 60) || "error";
+  }
+  return "error";
+}
+
+/** Thrown when every provider failed; the message lists each provider's reason (never keys or text). */
+export class TranslateError extends Error {
+  constructor(reason: string) {
+    super(reason);
+    this.name = "TranslateError";
+  }
+}
+
+/**
+ * One chat completion for translation, trying each set-up provider until one answers. Throws a
+ * TranslateError naming why each provider failed.
+ */
+async function translateCall(
+  system: string,
+  user: string,
+  maxTokens: number,
+  options: { env?: Env; fetcher?: typeof fetch; now?: number } = {},
+): Promise<string> {
+  const env = options.env ?? process.env;
+  const fetcher = options.fetcher ?? fetch;
+  const configs = translateConfigs(env);
+  if (!configs.length) throw new TranslateError("unconfigured: no AI key is set on this server");
+  const now = options.now ?? Date.now();
+  const cooling = (config: ProviderConfig) => (translateCooldown.get(`${config.id}:${config.model}`) ?? 0) > now;
+  const ordered = [...configs.filter((config) => !cooling(config)), ...configs.filter(cooling)];
+  const reasons: string[] = [];
+  for (const config of ordered) {
+    const openai = config.id === "openai" || config.id === "gemini" || config.gateway === true;
+    try {
+      const response = await fetcher(`${config.baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${config.apiKey}` },
+        body: JSON.stringify({
+          model: config.model,
+          messages: [
+            { role: "system", content: system },
+            { role: "user", content: user },
+          ],
+          ...(openai ? { max_completion_tokens: maxTokens } : { max_tokens: maxTokens, temperature: 0 }),
+          stream: false,
+        }),
+        signal: AbortSignal.timeout(TRANSLATE_TIMEOUT_MS),
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const completion = await response.json();
+      if ((completion as ChatCompletion).choices?.[0]?.finish_reason === "length") {
+        throw new Error("truncated reply");
+      }
+      const { raw } = readProviderResponse(config, completion);
+      const text = stripFences(raw);
+      if (!text) throw new Error("empty reply");
+      translateCooldown.delete(`${config.id}:${config.model}`);
+      return text;
+    } catch (error) {
+      const reason = failureReason(error);
+      reasons.push(`${config.id} (${config.model}): ${reason}`);
+      if (reason === "timeout" || /^HTTP (40[0-4]|429|5\d\d)$/.test(reason)) {
+        translateCooldown.set(`${config.id}:${config.model}`, now + TRANSLATE_COOLDOWN_MS);
+      }
+    }
+  }
+  const message = reasons.join("; ");
+  // Status only: never the key and never the reader's text.
+  console.warn(`[translate] all providers failed: ${message}`);
+  throw new TranslateError(message);
+}
+
+function stripFences(raw: string): string {
+  return raw
+    .trim()
+    .replace(/^```[a-z]*\s*/i, "")
+    .replace(/\s*```$/, "")
+    .trim();
+}
+
+/** Split text into pieces of at most `size` characters at paragraph, then line, then sentence breaks. Exported for tests. */
+export function splitForTranslation(text: string, size = TRANSLATE_CHUNK_CHARS): string[] {
+  const chunks: string[] = [];
+  let current = "";
+  const flush = () => {
+    if (current.trim()) chunks.push(current.trim());
+    current = "";
+  };
+  const add = (piece: string, joiner: string) => {
+    if (!piece.trim()) return;
+    if (current && current.length + joiner.length + piece.length > size) flush();
+    if (piece.length <= size) {
+      current = current ? `${current}${joiner}${piece}` : piece;
+      return;
+    }
+    // A single piece longer than the limit: break it at sentence ends, then hard-wrap.
+    flush();
+    const sentences = piece.match(/[^.!?。！？।؟]+[.!?。！？।؟]*\s*/g) ?? [piece];
+    for (const sentence of sentences) {
+      if (current.length + sentence.length > size) flush();
+      if (sentence.length > size) {
+        for (let at = 0; at < sentence.length; at += size) chunks.push(sentence.slice(at, at + size).trim());
+      } else current += sentence;
+    }
+    flush();
+  };
+  for (const paragraph of text.split(/\n{2,}/)) add(paragraph.trim(), "\n\n");
+  flush();
+  return chunks.filter(Boolean);
+}
+
+async function mapLimit<T, R>(items: T[], limit: number, run: (item: T, index: number) => Promise<R>): Promise<PromiseSettledResult<R>[]> {
+  const results: PromiseSettledResult<R>[] = new Array(items.length);
+  let next = 0;
+  async function worker() {
+    while (next < items.length) {
+      const index = next++;
+      try {
+        results[index] = { status: "fulfilled", value: await run(items[index] as T, index) };
+      } catch (reason) {
+        results[index] = { status: "rejected", reason };
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
+function translatePrompt(language: string): string {
+  return (
+    `You are a translator. Translate the user's text into ${language}. Reply with the translation only: ` +
+    "no notes, no quotes, no preamble. Keep the line breaks. Lines that start with # are headings: keep the # marks " +
+    "and translate the words after them. Keep names, dates, numbers, and web addresses."
+  );
+}
+
+/** Output budget for one piece: generous, because some scripts take several tokens per word. */
+function tokenBudget(chars: number): number {
+  return Math.min(8000, Math.max(800, Math.ceil(chars * 3)));
+}
+
+/** Translate a short search query. Throws a TranslateError when no provider could do it. */
+export async function translateQuery(
+  query: string,
+  lang: string,
+  options: { env?: Env; fetcher?: typeof fetch } = {},
+): Promise<string> {
+  const language = TRANSLATE_NAMES[lang];
+  if (!language) return query;
+  const system =
+    `Translate this web search query into ${language}. Reply with the translated query only, on one line, ` +
+    "with no quotes or notes. If it is already in that language, repeat it unchanged.";
+  const raw = await translateCall(system, query, 1000, options);
+  return raw.split("\n")[0]?.replace(/^["“”'«»]+|["“”'«»]+$/g, "").replace(/\s+/g, " ").trim() || query;
+}
+
+/**
+ * Translate a list of short strings (result titles and snippets) in one call. Throws a
+ * TranslateError when no provider could do it or the reply does not line up.
+ */
+export async function translateList(
+  items: string[],
+  lang: string,
+  options: { env?: Env; fetcher?: typeof fetch } = {},
+): Promise<string[]> {
+  const language = TRANSLATE_NAMES[lang];
+  if (!language || items.length === 0) return items;
+  const system =
+    `Translate each string in the JSON array into ${language}. Reply with only a JSON array of strings, ` +
+    "the same length and in the same order. Keep empty strings empty. Keep names, dates, and numbers.";
+  const input = JSON.stringify(items);
+  const raw = await translateCall(system, input, tokenBudget(input.length), options);
+  const parsed = readStringArray(raw);
+  if (!parsed || parsed.length !== items.length) throw new TranslateError("reply did not match the list");
+  return parsed.map((value, index) => value.trim() || (items[index] ?? ""));
+}
+
+/** Pull a JSON array of strings out of a model reply. Exported for tests. */
+export function readStringArray(raw: string): string[] | null {
+  const trimmed = stripFences(raw);
+  const start = trimmed.indexOf("[");
+  const end = trimmed.lastIndexOf("]");
+  if (start < 0 || end <= start) return null;
+  try {
+    const parsed = JSON.parse(trimmed.slice(start, end + 1)) as unknown;
+    if (!Array.isArray(parsed)) return null;
+    if (!parsed.every((value) => typeof value === "string")) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Translate a preview title and passage (Grokipedia or Wikipedia article text, web page text).
+ * Long text is split into pieces translated side by side, so a long article never overruns one
+ * reply. Pieces that fail stay in the original language and `partial` is set; when nothing could be
+ * translated it throws a TranslateError that says why.
  */
 export async function runTranslate(
   input: { lang: string; title: string; text: string },
   options: { env?: Env; fetcher?: typeof fetch } = {},
-): Promise<{ title: string; text: string }> {
+): Promise<{ title: string; text: string; partial?: boolean }> {
   const language = TRANSLATE_NAMES[input.lang];
   if (!language) return { title: input.title, text: input.text };
-  const env = options.env ?? process.env;
-  const config =
-    readProviderConfig("grok", env) ??
-    configForModel("gpt-4.1-mini", env) ??
-    configForModel("gemini-2.5-flash-lite", env);
-  if (!config) throw new Error("unconfigured");
-  const fetcher = options.fetcher ?? fetch;
-  const prompt = `Translate into ${language}. Reply with JSON only: {"title":"...","text":"..."}. Keep lines that start with # as headings: translate the words after the # marks and leave the # marks in place. Keep names, dates, and numbers. Do not add notes.\n\nTitle: ${input.title}\n\nText:\n${input.text}`;
-  const openai = config.id === "openai" || config.id === "gemini" || config.gateway === true;
-  const response = await fetcher(`${config.baseUrl}/chat/completions`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${config.apiKey}` },
-    body: JSON.stringify({
-      model: config.model,
-      messages: [
-        { role: "system", content: "You translate. Return JSON only." },
-        { role: "user", content: prompt },
-      ],
-      ...(openai ? { max_completion_tokens: 1200 } : { max_tokens: 1200, temperature: 0 }),
-      stream: false,
-    }),
-    signal: AbortSignal.timeout(AI_TIMEOUT_MS),
-  });
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  const { raw } = readProviderResponse(config, await response.json());
-  const parsed = readTranslation(raw);
-  if (!parsed) throw new Error("empty translation");
-  return parsed;
+  const system = translatePrompt(language);
+  const pieces = [input.title, ...splitForTranslation(input.text)];
+  const settled = await mapLimit(pieces, TRANSLATE_PARALLEL, (piece) =>
+    translateCall(system, piece, tokenBudget(piece.length), options),
+  );
+  const done = settled.filter((row) => row.status === "fulfilled").length;
+  if (done === 0) {
+    const first = settled.find((row): row is PromiseRejectedResult => row.status === "rejected");
+    throw first?.reason instanceof Error ? first.reason : new TranslateError("translation failed");
+  }
+  const out = settled.map((row, index) =>
+    row.status === "fulfilled" ? row.value : (pieces[index] ?? ""),
+  );
+  const title = (out[0] ?? input.title).split("\n")[0]?.replace(/^#+\s*/, "").trim() || input.title;
+  return {
+    title: title.slice(0, 240),
+    text: out.slice(1).join("\n\n"),
+    ...(done < pieces.length ? { partial: true } : {}),
+  };
 }
 
 async function askProvider(

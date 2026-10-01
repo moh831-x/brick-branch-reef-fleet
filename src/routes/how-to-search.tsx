@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { SiteFooter } from "@/components/site-footer";
+import { DocPage } from "@/components/doc-page-chrome";
 
 const TITLE = "How to search with Folio by Zip1";
 const DESCRIPTION =
@@ -19,12 +19,7 @@ export const Route = createFileRoute("/how-to-search")({
 
 function HowToSearchPage() {
   return (
-    <main className="mx-auto min-h-screen max-w-2xl px-4 pt-12">
-      <p className="mb-8">
-        <Link to="/" search={{ q: "", near: "" }} className="font-display text-2xl tracking-tight text-ink">
-          Folio
-        </Link>
-      </p>
+    <DocPage>
       <h1 className="font-display text-4xl leading-tight tracking-tight text-ink">Using Folio to search</h1>
       <div className="mt-6 grid gap-4 text-sm leading-relaxed text-ink">
         <p>
@@ -76,16 +71,30 @@ function HowToSearchPage() {
         </p>
         <p>
           Click the title or text of a result to open a preview panel. Close it with Escape or the close control.
-          While it is open, the left and right arrow keys move to the previous or next result. The language menu on the
-          home screen, and the same choices in the preview, pick English, Bangla, Simplified Chinese, or Hindi. That
-          choice translates the preview, switches its buttons, and is the language used when you listen. This browser
-          remembers it, and the home screen, the search pages, and the AI answer use that language. When the preview comes from Wikipedia or Grokipedia and the article has sections, Contents
-          lists them. Choosing one scrolls to that part. When the language is not English, the next search translates your words and looks up the web and
-          Wikipedia in that language. A line under the query shows the words that were searched. Grokipedia still
-          uses the words you typed. English keeps the original text. The player’s voice button lists the voices this
-          browser has installed for that language, and the choice is remembered. Pause, stop, and speed are on the player, and closing the preview stops it. Open page goes to the
+          While it is open, the left and right arrow keys move to the previous or next result (on a right-to-left page,
+          the right arrow goes back). When the preview comes from Wikipedia or Grokipedia and the article has sections,
+          Contents lists them. Choosing one scrolls to that part. Listen reads the preview aloud in the site language.
+          The player’s voice button lists the voices this browser has installed for that language, and the choice is
+          remembered. Pause, stop, and speed are on the player, and closing the preview stops it. Open page goes to the
           original address in this window. The arrow button on the result row opens that address in a new tab. When a
           lead card is shown, Read the article opens the article in this window as well.
+        </p>
+        <p>
+          The language menu at the top of the home screen switches the whole site, including search pages and these
+          pages, between English, Bangla, Hindi, Arabic, Spanish, French, Simplified Chinese, Japanese, Portuguese, and German.
+          Arabic switches the layout to right to left. This browser remembers the choice. Until you pick one, Folio uses
+          the first of your browser’s languages that it has, or English. A link can also set it with{" "}
+          <span className="font-mono">?lang=</span>, for example <span className="font-mono">?lang=ar</span>.
+        </p>
+        <p>
+          The language also changes what Folio searches. When it is not English, Folio translates your words and
+          searches that language’s Wikipedia. Bing’s web results only work reliably for words in Latin script, so the web
+          is searched with your words when Bing can read them and otherwise with an English translation. Grokipedia only
+          has English pages, so it is searched with an English translation, and its titles and snippets are translated
+          into the site language. Lines under the query show the words each source was searched with. The AI answer is written in the site language, and Listen on the answer
+          reads it with a voice for that language. A preview in another language is translated into the site language;
+          a Wikipedia article from that language’s own Wikipedia is shown as it is. To change the language, go back to
+          the home screen and pick another one there; your next search uses it.
         </p>
         <p>
           Click a picture to open the same preview with a larger copy of the image, its title, the site, and its size.
@@ -122,12 +131,6 @@ function HowToSearchPage() {
           and this page are the pages that explain the site.
         </p>
       </div>
-      <p className="mt-8">
-        <Link to="/" search={{ q: "", near: "" }} className="text-sm font-medium text-ink">
-          Back to search
-        </Link>
-      </p>
-      <SiteFooter />
-    </main>
+    </DocPage>
   );
 }

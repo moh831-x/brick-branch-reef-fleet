@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { IMAGES_PAGE, readBotSearch } from "./search.shared.ts";
+import { IMAGES_PAGE, isLatinQuery, readBotSearch, relevantCount } from "./search.shared.ts";
 
 function read(query: string) {
   return readBotSearch(new URLSearchParams(query));
@@ -64,5 +64,28 @@ describe("readBotSearch ai_model", () => {
     const unknown = read("q=dogs&ai=1&ai_model=nope");
     assert.ok(!("error" in unknown));
     assert.equal(unknown.aiModel, undefined);
+  });
+});
+
+describe("web query relevance", () => {
+  it("tells Latin-script queries from others", () => {
+    assert.equal(isLatinQuery("Berlin"), true);
+    assert.equal(isLatinQuery("Berlín café — Ürün"), true);
+    assert.equal(isLatinQuery("বার্লিন"), false);
+    assert.equal(isLatinQuery("बर्लिन"), false);
+    assert.equal(isLatinQuery("برلين"), false);
+    assert.equal(isLatinQuery("ベルリン"), false);
+    assert.equal(isLatinQuery("柏林"), false);
+  });
+
+  it("counts results that mention the query, ignoring accents and case", () => {
+    const hits = [
+      { title: "Berlin - Wikipedia", snippet: "Capital of Germany", url: "https://en.wikipedia.org/wiki/Berlin" },
+      { title: "YouTube TV Help", snippet: "Manage your home area", url: "https://support.google.com/youtubetv" },
+      { title: "Visit", snippet: "Things to do", url: "https://www.visitberlin.de/en" },
+    ];
+    assert.equal(relevantCount(hits, "Berlín"), 2);
+    assert.equal(relevantCount(hits, "বার্লিন"), 0);
+    assert.equal(relevantCount([{ title: "বার্লিন - উইকিপিডিয়া", snippet: "", url: "https://bn.wikipedia.org" }], "বার্লিন"), 1);
   });
 });

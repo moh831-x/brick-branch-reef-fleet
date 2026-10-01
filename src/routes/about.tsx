@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { SiteFooter } from "@/components/site-footer";
+import { DocPage } from "@/components/doc-page-chrome";
 
 const TITLE = "About Folio by Zip1";
 const DESCRIPTION =
@@ -19,12 +19,7 @@ export const Route = createFileRoute("/about")({
 
 function AboutPage() {
   return (
-    <main className="mx-auto min-h-screen max-w-2xl px-4 pt-12">
-      <p className="mb-8">
-        <Link to="/" search={{ q: "", near: "" }} className="font-display text-2xl tracking-tight text-ink">
-          Folio
-        </Link>
-      </p>
+    <DocPage>
       <h1 className="font-display text-4xl leading-tight tracking-tight text-ink">What Folio by Zip1 is</h1>
       <div className="mt-6 grid gap-4 text-sm leading-relaxed text-ink">
         <p>
@@ -72,12 +67,6 @@ function AboutPage() {
           .
         </p>
       </div>
-      <p className="mt-8">
-        <Link to="/" search={{ q: "", near: "" }} className="text-sm font-medium text-ink">
-          Back to search
-        </Link>
-      </p>
-      <SiteFooter />
-    </main>
+    </DocPage>
   );
 }
