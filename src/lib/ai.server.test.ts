@@ -12,6 +12,7 @@ import {
   classifyFailure,
   errorDetail,
   isPlanRefusal,
+  outputBudget,
   sanitizeDetail,
   timeoutFor,
   planBlockedModels,
@@ -88,7 +89,7 @@ describe("provider config", () => {
     assert.equal(body(openaiRequest.init).temperature, undefined);
 
     const claude = readProviderConfig("claude", env)!;
-    assert.equal(claude.model, "anthropic/claude-3-haiku");
+    assert.equal(claude.model, "anthropic/claude-haiku-4.5");
     assert.equal(claude.api, "chat");
     const claudeRequest = buildProviderRequest(claude, "dogs", context);
     assert.equal(claudeRequest.url, "https://ai-gateway.vercel.sh/v1/chat/completions");
@@ -190,12 +191,13 @@ describe("runAiAnswer", () => {
 
   it("falls back to the next set-up provider and reports who answered", async () => {
     const { fetcher, calls } = fakeFetch(["grok"]);
-    const answer = await runAiAnswer("dogs", context, undefined, { env: ALL, fetcher });
+    const answer = await runAiAnswer("dogs", context, undefined, { env: ALL, fetcher, retryDelayMs: 0 });
     assert.ok(answer.status === "ok");
     assert.equal(answer.provider, "openai");
     assert.deepEqual(answer.failed, ["grok"]);
     assert.equal(answer.citations[0].url, "https://a.example/1");
-    assert.equal(calls.length, 2);
+    assert.equal(calls.length, 3, "Grok's 500 is retried once, then ChatGPT answers");
+    assert.equal(answer.attempts?.[0]?.detail, "nope (failed twice)");
   });
 
   it("skips providers without a key and errors when every set-up provider fails", async () => {
@@ -203,10 +205,11 @@ describe("runAiAnswer", () => {
     const answer = await runAiAnswer("dogs", context, "grok", {
       env: { OPENAI_API_KEY: "o", ANTHROPIC_API_KEY: "a" },
       fetcher,
+      retryDelayMs: 0,
     });
     assert.equal(answer.status, "error");
     assert.deepEqual(answer.status === "error" ? answer.failed : [], ["openai", "claude"]);
-    assert.equal(calls.length, 2);
+    assert.equal(calls.length, 4, "each 500 is retried once");
   });
 });
 
@@ -291,7 +294,7 @@ describe("GPT-6 Astra and Claude through the AI Gateway", () => {
     const sonnet = await runAiAnswer("dogs", context, "claude-sonnet-5.5", { env: GATEWAY, fetcher });
     assert.ok(sonnet.status === "ok");
     assert.equal(sonnet.provider, "claude", "falls back to the gateway's Claude default");
-    assert.equal(sonnet.model, "anthropic/claude-3-haiku");
+    assert.equal(sonnet.model, "anthropic/claude-haiku-4.5");
     assert.equal(sonnet.picked, "claude-sonnet-5.5");
     assert.deepEqual(sonnet.attempts?.map((a) => [a.model, a.kind, a.status]), [["anthropic/claude-sonnet-5.5", "plan", 403]]);
     assert.match(sonnet.attempts?.[0]?.detail ?? "", /Free credits cannot be used/);
@@ -451,5 +454,61 @@ describe("slow models: timeouts, low effort, and an early fallback", () => {
     const answer = await runAiAnswer("dogs", context, "grok-4.7", { env: { XAI_API_KEY: "x" }, fetcher, hedgeMs: 10, totalMs: 150, minCallMs: 100 });
     assert.equal(answer.status, "error");
     assert.deepEqual(answer.attempts?.map((a) => [a.model, a.kind]), [["grok-4.7", "timeout"], ["grok-4.3", "timeout"]]);
+  });
+});
+
+describe("Claude through the AI Gateway: minimal, valid requests", () => {
+  it("uses Claude Haiku 4.5 as the gateway default (Claude 3 Haiku is retired) with a minimal body", () => {
+    // ANTHROPIC_EFFORT is meant for Anthropic's own API; it must not turn into `reasoning` on the gateway.
+    const config = readProviderConfig("claude", { AI_GATEWAY_API_KEY: "g", ANTHROPIC_EFFORT: "low" });
+    assert.ok(config);
+    assert.equal(config.model, "anthropic/claude-haiku-4.5");
+    assert.equal(config.effort, undefined);
+    const request = buildProviderRequest(config, "dogs", context, "English");
+    const sent = body(request.init);
+    assert.deepEqual(Object.keys(sent).sort(), ["max_tokens", "messages", "model", "stream"]);
+    assert.deepEqual((sent.messages as Array<{ role: string; content: string }>).map((m) => m.role), ["system", "user"]);
+    assert.ok((sent.messages as Array<{ content: string }>).every((m) => m.content.trim().length > 0));
+    assert.equal(sent.max_tokens, 1200);
+    // Own Anthropic key: the effort setting still applies there.
+    assert.equal(readProviderConfig("claude", { ANTHROPIC_API_KEY: "a", ANTHROPIC_EFFORT: "low" })?.effort, "low");
+    // Same for OpenAI: GPT-4.1 mini on the gateway gets no reasoning field.
+    assert.equal(readProviderConfig("openai", { AI_GATEWAY_API_KEY: "g", OPENAI_REASONING_EFFORT: "low" })?.effort, undefined);
+  });
+
+  it("never asks for more output than the model allows", () => {
+    assert.equal(outputBudget({ model: "anthropic/claude-3-haiku" }), 1200);
+    assert.equal(outputBudget({ model: "claude-3-haiku-20240307", effort: "low" }), 4096);
+    assert.equal(outputBudget({ model: "claude-3-5-haiku-latest", effort: "low" }), 4200);
+    assert.equal(outputBudget({ model: "openai/gpt-6-astra", effort: "low" }), 4200);
+    assert.equal(outputBudget({ model: "anthropic/claude-sonnet-5.5" }), 1200);
+  });
+
+  it("retries a 5xx once on the same model before falling back", async () => {
+    let calls = 0;
+    const fetcher = (async (_url: string | URL, init?: RequestInit) => {
+      calls += 1;
+      const model = String(body(init ?? {}).model);
+      if (calls === 1) return Response.json({ error: { message: "Internal Server Error", type: "AI_APICallError" } }, { status: 500 });
+      return Response.json({ model, choices: [{ message: { content: "Back [1]." } }] });
+    }) as typeof fetch;
+    const answer = await runAiAnswer("dogs", context, "claude-haiku-4.5", { env: { AI_GATEWAY_API_KEY: "g" }, fetcher, retryDelayMs: 0 });
+    assert.ok(answer.status === "ok");
+    assert.equal(answer.model, "anthropic/claude-haiku-4.5");
+    assert.deepEqual(answer.attempts, []);
+    assert.equal(calls, 2);
+  });
+
+  it("does not retry a 4xx", async () => {
+    const models: string[] = [];
+    const fetcher = (async (_url: string | URL, init?: RequestInit) => {
+      const model = String(body(init ?? {}).model);
+      models.push(model);
+      if (model === "anthropic/claude-haiku-4.5") return Response.json({ error: { message: "bad" } }, { status: 400 });
+      return Response.json({ model, choices: [{ message: { content: "Hi [1]." } }] });
+    }) as typeof fetch;
+    const answer = await runAiAnswer("dogs", context, "claude-haiku-4.5", { env: { XAI_API_KEY: "x", AI_GATEWAY_API_KEY: "g" }, fetcher, retryDelayMs: 0 });
+    assert.ok(answer.status === "ok");
+    assert.deepEqual(models, ["anthropic/claude-haiku-4.5", "grok-4.3"]);
   });
 });

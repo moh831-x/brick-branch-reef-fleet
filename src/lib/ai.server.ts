@@ -102,6 +102,13 @@ export const AI_TOTAL_MS = 52_000;
 export const AI_HEDGE_MS = 15_000;
 /** A call with less time than this left is not started. */
 const MIN_CALL_MS = 4_000;
+/** Pause before the one retry after a provider 5xx. */
+const RETRY_DELAY_MS = 500;
+
+/** Server errors worth one more try (not 504, which is already a timeout). */
+function isRetryable(attempt: AiAttempt): boolean {
+  return attempt.kind === "server" && attempt.status !== undefined && attempt.status !== 504;
+}
 /** Room for a few sentences plus any reasoning tokens the model spends first. */
 const MAX_OUTPUT_TOKENS = 1200;
 /** Extra room for the hidden reasoning tokens a reasoning model spends before it writes. */
@@ -111,7 +118,9 @@ const AI_GATEWAY_BASE = "https://ai-gateway.vercel.sh/v1";
 /** Models the current AI Gateway plan can call. Direct provider keys still use their own defaults. */
 const AI_GATEWAY_MODELS = {
   openai: "openai/gpt-4.1-mini",
-  claude: "anthropic/claude-3-haiku",
+  // Claude 3 Haiku was retired by Anthropic on Apr 20, 2026; the gateway still lists it but calls
+  // fail with HTTP 500 (AI_APICallError). Haiku 4.5 is Anthropic's named replacement.
+  claude: "anthropic/claude-haiku-4.5",
 } as const;
 
 export type ProviderConfig = {
@@ -135,8 +144,11 @@ export function readProviderConfig(id: AiProviderId, env: Env = process.env): Pr
   const viaGateway = !ownKey;
   const model =
     env[spec.modelVar]?.trim() || (viaGateway && id !== "grok" ? AI_GATEWAY_MODELS[id] : spec.defaultModel);
-  const effort =
-    (spec.effortVar && env[spec.effortVar]?.trim()) || (!viaGateway && model === spec.defaultModel ? spec.defaultEffort : undefined);
+  // Effort only goes to the provider's own API. Through the gateway it would become a `reasoning`
+  // object, which non-reasoning defaults (GPT-4.1 mini, Claude Haiku 4.5) don't take.
+  const effort = viaGateway
+    ? undefined
+    : (spec.effortVar && env[spec.effortVar]?.trim()) || (model === spec.defaultModel ? spec.defaultEffort : undefined);
   return {
     id,
     api: viaGateway ? "chat" : spec.api,
@@ -252,7 +264,7 @@ export function buildProviderRequest(config: ProviderConfig, query: string, cont
         },
         body: JSON.stringify({
           model: config.model,
-          max_tokens: MAX_OUTPUT_TOKENS,
+          max_tokens: outputBudget(config),
           system,
           messages: [{ role: "user", content: prompt }],
           ...(config.effort ? { output_config: { effort: config.effort } } : {}),
@@ -284,7 +296,7 @@ export function buildProviderRequest(config: ProviderConfig, query: string, cont
           ? { max_tokens: outputBudget(config) }
           : openai || config.effort
             ? { max_completion_tokens: outputBudget(config) }
-            : { max_tokens: MAX_OUTPUT_TOKENS, temperature: 0.2 }),
+            : { max_tokens: outputBudget(config), temperature: 0.2 }),
         // The AI Gateway takes a unified `reasoning` object; OpenAI and xAI take `reasoning_effort`.
         ...(config.effort ? (config.gateway ? { reasoning: { effort: config.effort } } : { reasoning_effort: config.effort }) : {}),
         stream: false,
@@ -293,8 +305,21 @@ export function buildProviderRequest(config: ProviderConfig, query: string, cont
   };
 }
 
-function outputBudget(config: ProviderConfig): number {
-  return config.effort ? MAX_OUTPUT_TOKENS + REASONING_TOKENS : MAX_OUTPUT_TOKENS;
+/**
+ * Output-token ceilings of models that are lower than our largest budget, so a request never asks
+ * for more than the model allows (a custom XAI_MODEL / OPENAI_MODEL / ANTHROPIC_MODEL included).
+ */
+const OUTPUT_CAPS: ReadonlyArray<[RegExp, number]> = [
+  [/claude-3-(haiku|opus|sonnet)/, 4096],
+  [/claude-3[.-]5/, 8192],
+  [/gpt-4o-mini|gpt-4o\b/, 16_384],
+];
+
+/** Output tokens to ask for: room for the answer, plus reasoning room when the model reasons. Exported for tests. */
+export function outputBudget(config: Pick<ProviderConfig, "model" | "effort">): number {
+  const want = config.effort ? MAX_OUTPUT_TOKENS + REASONING_TOKENS : MAX_OUTPUT_TOKENS;
+  const cap = OUTPUT_CAPS.find(([pattern]) => pattern.test(config.model))?.[1];
+  return cap ? Math.min(want, cap) : want;
 }
 
 /** One model call that did not produce an answer, with a reason that is safe to show and log. */
@@ -744,13 +769,14 @@ export async function runAiAnswer(
   query: string,
   context: AiContextItem[],
   preferred?: string,
-  options: { env?: Env; fetcher?: typeof fetch; answerLanguage?: string; totalMs?: number; hedgeMs?: number; minCallMs?: number } = {},
+  options: { env?: Env; fetcher?: typeof fetch; answerLanguage?: string; totalMs?: number; hedgeMs?: number; minCallMs?: number; retryDelayMs?: number } = {},
 ): Promise<AiAnswer> {
   const env = options.env ?? process.env;
   const fetcher = options.fetcher ?? fetch;
   const totalMs = options.totalMs ?? AI_TOTAL_MS;
   const hedgeMs = options.hedgeMs ?? AI_HEDGE_MS;
   const minCallMs = options.minCallMs ?? MIN_CALL_MS;
+  const retryDelayMs = options.retryDelayMs ?? RETRY_DELAY_MS;
   const started = Date.now();
   const modelId = aiModelOf(preferred);
   const pickedProvider = modelId ? AI_MODELS.find((model) => model.id === modelId)?.provider : undefined;
@@ -800,15 +826,28 @@ export async function runAiAnswer(
         log.push({ provider: config.id, model: config.model, kind: "timeout", detail: "not tried: out of time" });
         continue;
       }
-      const timeoutMs = Math.min(timeoutFor(config), left);
-      try {
-        const answer = await askProvider(config, query, context, fetcher, options.answerLanguage, { timeoutMs, signal: stop });
-        return { ...answer, config };
-      } catch (error) {
-        if (stop?.aborted) return null;
-        const attempt = attemptFrom(config, error, timeoutMs);
-        console.error(attemptLogLine(attempt));
-        log.push(attempt);
+      let retried = false;
+      for (;;) {
+        const timeoutMs = Math.min(timeoutFor(config), remaining());
+        try {
+          const answer = await askProvider(config, query, context, fetcher, options.answerLanguage, { timeoutMs, signal: stop });
+          return { ...answer, config };
+        } catch (error) {
+          if (stop?.aborted) return null;
+          const attempt = attemptFrom(config, error, timeoutMs);
+          // A 5xx is often a passing provider hiccup: try the same model once more if there's time.
+          if (!retried && isRetryable(attempt) && remaining() >= minCallMs + retryDelayMs) {
+            retried = true;
+            console.error(`${attemptLogLine(attempt)} (retrying once)`);
+            await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+            if (stop?.aborted) return null;
+            continue;
+          }
+          if (retried) attempt.detail = sanitizeDetail(`${attempt.detail ? `${attempt.detail} ` : ""}(failed twice)`);
+          console.error(attemptLogLine(attempt));
+          log.push(attempt);
+          break;
+        }
       }
     }
     return null;
