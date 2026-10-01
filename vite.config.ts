@@ -175,6 +175,9 @@ export default defineConfig(({ command, isPreview }) => ({
             // manifest + head-tag middleware). Nitro v3 defaults serverDir to
             // false, so removing this silently unwires /?install=1 on deploys.
             serverDir: "./server",
+            // AI answers can wait up to ~52 s for a slow reasoning model plus its fallback
+            // (AI_TOTAL_MS in src/lib/ai.server.ts). 60 s is allowed on every Vercel plan.
+            vercel: { functions: { maxDuration: 60 } },
           }),
         ]
       : []),

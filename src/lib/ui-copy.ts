@@ -95,6 +95,7 @@ export type UiCopy = {
   fullImage: string;
   loadingPreview: string;
   aiWhy: string;
+  aiSlow: string;
   failPlan: string;
   failAuth: string;
   failBadRequest: string;
@@ -221,6 +222,7 @@ const en: UiCopy = {
   fullImage: "View full-size image",
   loadingPreview: "Loading the full preview…",
   aiWhy: "Why?",
+  aiSlow: "Still waiting for {model}. It can take up to {seconds} seconds; if it doesn’t answer, another model will.",
   failPlan: "Not included in the AI Gateway plan or out of credits",
   failAuth: "The key was refused",
   failBadRequest: "The request was rejected",
@@ -346,6 +348,7 @@ export const UI: Record<UiLang, UiCopy> = {
     fullImage: "পূর্ণ ছবি দেখুন",
     loadingPreview: "পূর্ণ প্রিভিউ লোড হচ্ছে…",
     aiWhy: "কেন?",
+    aiSlow: "এখনও {model}-এর অপেক্ষায়। এটি {seconds} সেকেন্ড পর্যন্ত নিতে পারে; উত্তর না দিলে অন্য মডেল দেবে।",
     failPlan: "AI Gateway প্ল্যানে নেই বা ক্রেডিট শেষ",
     failAuth: "কী (key) প্রত্যাখ্যাত হয়েছে",
     failBadRequest: "অনুরোধ প্রত্যাখ্যাত হয়েছে",
@@ -468,6 +471,7 @@ export const UI: Record<UiLang, UiCopy> = {
     fullImage: "पूरा चित्र देखें",
     loadingPreview: "पूरा पूर्वावलोकन लोड हो रहा है…",
     aiWhy: "क्यों?",
+    aiSlow: "अभी भी {model} का इंतज़ार है। इसमें {seconds} सेकंड तक लग सकते हैं; उत्तर न मिलने पर कोई दूसरा मॉडल देगा।",
     failPlan: "AI Gateway प्लान में शामिल नहीं या क्रेडिट खत्म",
     failAuth: "कुंजी अस्वीकार हुई",
     failBadRequest: "अनुरोध अस्वीकार हुआ",
@@ -590,6 +594,7 @@ export const UI: Record<UiLang, UiCopy> = {
     fullImage: "عرض الصورة بالحجم الكامل",
     loadingPreview: "جارٍ تحميل المعاينة الكاملة…",
     aiWhy: "لماذا؟",
+    aiSlow: "ما زلنا ننتظر {model}. قد يستغرق ما يصل إلى {seconds} ثانية؛ وإن لم يُجب فسيجيب نموذج آخر.",
     failPlan: "غير مشمول في خطة AI Gateway أو نفد الرصيد",
     failAuth: "رُفض المفتاح",
     failBadRequest: "رُفض الطلب",
@@ -712,6 +717,7 @@ export const UI: Record<UiLang, UiCopy> = {
     fullImage: "Ver imagen a tamaño completo",
     loadingPreview: "Cargando la vista previa completa…",
     aiWhy: "¿Por qué?",
+    aiSlow: "Seguimos esperando a {model}. Puede tardar hasta {seconds} segundos; si no responde, lo hará otro modelo.",
     failPlan: "No incluido en el plan de AI Gateway o sin créditos",
     failAuth: "Se rechazó la clave",
     failBadRequest: "Se rechazó la solicitud",
@@ -834,6 +840,7 @@ export const UI: Record<UiLang, UiCopy> = {
     fullImage: "Voir l’image en taille réelle",
     loadingPreview: "Chargement de l’aperçu complet…",
     aiWhy: "Pourquoi ?",
+    aiSlow: "Toujours en attente de {model}. Cela peut prendre jusqu’à {seconds} secondes ; s’il ne répond pas, un autre modèle le fera.",
     failPlan: "Non inclus dans l’offre AI Gateway ou crédits épuisés",
     failAuth: "La clé a été refusée",
     failBadRequest: "La requête a été rejetée",
@@ -956,6 +963,7 @@ export const UI: Record<UiLang, UiCopy> = {
     fullImage: "查看大图",
     loadingPreview: "正在加载完整预览…",
     aiWhy: "为什么？",
+    aiSlow: "仍在等待 {model}。最多可能需要 {seconds} 秒；如果它没有回答，将由其他模型回答。",
     failPlan: "不在 AI Gateway 套餐内或额度已用完",
     failAuth: "密钥被拒绝",
     failBadRequest: "请求被拒绝",
@@ -1078,6 +1086,7 @@ export const UI: Record<UiLang, UiCopy> = {
     fullImage: "フルサイズの画像を見る",
     loadingPreview: "プレビュー全体を読み込んでいます…",
     aiWhy: "理由",
+    aiSlow: "{model} の応答を待っています。最大 {seconds} 秒かかることがあります。応答がない場合は別のモデルが答えます。",
     failPlan: "AI Gateway のプランに含まれていないか、クレジット切れです",
     failAuth: "キーが拒否されました",
     failBadRequest: "リクエストが拒否されました",
@@ -1200,6 +1209,7 @@ export const UI: Record<UiLang, UiCopy> = {
     fullImage: "Ver imagem em tamanho real",
     loadingPreview: "Carregando a prévia completa…",
     aiWhy: "Por quê?",
+    aiSlow: "Ainda aguardando {model}. Pode levar até {seconds} segundos; se não responder, outro modelo responderá.",
     failPlan: "Não incluído no plano do AI Gateway ou sem créditos",
     failAuth: "A chave foi recusada",
     failBadRequest: "A solicitação foi rejeitada",
@@ -1322,6 +1332,7 @@ export const UI: Record<UiLang, UiCopy> = {
     fullImage: "Bild in voller Größe ansehen",
     loadingPreview: "Vollständige Vorschau wird geladen…",
     aiWhy: "Warum?",
+    aiSlow: "Warte noch auf {model}. Das kann bis zu {seconds} Sekunden dauern; antwortet es nicht, übernimmt ein anderes Modell.",
     failPlan: "Nicht im AI-Gateway-Tarif enthalten oder kein Guthaben",
     failAuth: "Der Schlüssel wurde abgelehnt",
     failBadRequest: "Die Anfrage wurde abgelehnt",

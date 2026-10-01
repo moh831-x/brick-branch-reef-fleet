@@ -159,7 +159,7 @@ describe("AI model menu", () => {
     const byId = new Map(AI_MODELS.map((model) => [model.id, model]));
     assert.deepEqual(
       { ...byId.get("gpt-6-astra") },
-      { id: "gpt-6-astra", label: "GPT-6 Astra", provider: "openai", direct: "gpt-6-astra", gateway: "openai/gpt-6-astra", effort: "low" },
+      { id: "gpt-6-astra", label: "GPT-6 Astra", provider: "openai", direct: "gpt-6-astra", gateway: "openai/gpt-6-astra", effort: "low", timeoutMs: 40_000 },
     );
     assert.equal(byId.get("claude-sonnet-5.5")?.gateway, "anthropic/claude-sonnet-5.5");
     assert.equal(byId.get("claude-haiku-4.5")?.gateway, "anthropic/claude-haiku-4.5");

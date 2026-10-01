@@ -62,14 +62,26 @@ export type AiModelSpec = {
    * inside the output budget. Sent as `reasoning.effort` to the AI Gateway and `reasoning_effort` to OpenAI.
    */
   effort?: "low" | "medium" | "high";
+  /**
+   * How long one call may take before the next model is used. Models that always reason are slower
+   * than the 20 s default even at low effort.
+   */
+  timeoutMs?: number;
 };
 
+/** Per-call limit for models without their own `timeoutMs`. */
+export const AI_DEFAULT_TIMEOUT_MS = 20_000;
+/** Slow (reasoning) models: long enough for low-effort reasoning plus a short answer. */
+const SLOW_MS = 40_000;
+
 export const AI_MODELS: readonly AiModelSpec[] = [
-  { id: "grok-4.7", label: "Grok 4.7", provider: "grok", direct: "grok-4.7" },
-  { id: "grok-4.6", label: "Grok 4.6", provider: "grok", direct: "grok-4.6" },
+  // Grok 4.7 and 4.6 always reason (it can't be turned off) and default to high effort; low keeps
+  // a short cited answer quick. https://docs.x.ai (reasoning_effort: low | medium | high | xhigh).
+  { id: "grok-4.7", label: "Grok 4.7", provider: "grok", direct: "grok-4.7", effort: "low", timeoutMs: SLOW_MS },
+  { id: "grok-4.6", label: "Grok 4.6", provider: "grok", direct: "grok-4.6", effort: "low", timeoutMs: SLOW_MS },
   { id: "grok-4.3", label: "Grok 4.3", provider: "grok", direct: "grok-4.3" },
   // Model ids checked against https://ai-gateway.vercel.sh/v1/models (Oct 1, 2026).
-  { id: "gpt-6-astra", label: "GPT-6 Astra", provider: "openai", direct: "gpt-6-astra", gateway: "openai/gpt-6-astra", effort: "low" },
+  { id: "gpt-6-astra", label: "GPT-6 Astra", provider: "openai", direct: "gpt-6-astra", gateway: "openai/gpt-6-astra", effort: "low", timeoutMs: SLOW_MS },
   { id: "gpt-4.1-mini", label: "GPT-4.1 mini", provider: "openai", direct: "gpt-4.1-mini", gateway: "openai/gpt-4.1-mini" },
   { id: "gpt-4o-mini", label: "GPT-4o mini", provider: "openai", direct: "gpt-4o-mini", gateway: "openai/gpt-4o-mini" },
   { id: "gemini-2.5-flash-lite", label: "Gemini 2.5 Flash Lite", provider: "gemini", gateway: "google/gemini-2.5-flash-lite" },
@@ -79,6 +91,7 @@ export const AI_MODELS: readonly AiModelSpec[] = [
     provider: "claude",
     direct: "claude-sonnet-5-5",
     gateway: "anthropic/claude-sonnet-5.5",
+    timeoutMs: 35_000,
   },
   {
     id: "claude-haiku-4.5",
@@ -226,6 +239,11 @@ export type AiAttempt = {
   /** The provider's own short error message, cleaned of keys and the reader's text. */
   detail?: string;
 };
+
+/** How long the server gives this menu model before falling back. */
+export function aiModelTimeoutMs(id: string | undefined): number {
+  return AI_MODELS.find((model) => model.id === id)?.timeoutMs ?? AI_DEFAULT_TIMEOUT_MS;
+}
 
 /** The menu label for a menu, gateway, or provider model id ("openai/gpt-6-astra" -> "GPT-6 Astra"). */
 export function aiModelLabelFor(model: string): string {

@@ -13,6 +13,7 @@ import {
   errorDetail,
   isPlanRefusal,
   sanitizeDetail,
+  timeoutFor,
   planBlockedModels,
   readProviderConfig,
   readProviderResponse,
@@ -336,7 +337,7 @@ describe("why a model didn't answer", () => {
     const config = configForModel("gpt-6-astra", { AI_GATEWAY_API_KEY: "g" });
     assert.ok(config);
     const timeout = Object.assign(new Error("aborted"), { name: "TimeoutError" });
-    assert.deepEqual(attemptFrom(config, timeout), { provider: "openai", model: "openai/gpt-6-astra", kind: "timeout", detail: "no reply within 35 s" });
+    assert.deepEqual(attemptFrom(config, timeout), { provider: "openai", model: "openai/gpt-6-astra", kind: "timeout", detail: "no reply within 40 s" });
     assert.equal(
       attemptLogLine({ provider: "claude", model: "anthropic/claude-sonnet-5.5", kind: "plan", status: 402, detail: "Insufficient credits" }),
       '[ai] claude anthropic/claude-sonnet-5.5 failed: HTTP 402 plan "Insufficient credits"',
@@ -362,5 +363,93 @@ describe("why a model didn't answer", () => {
     assert.equal(answer.provider, "grok");
     assert.equal(answer.attempts?.[0]?.kind, "unavailable");
     assert.equal(answer.attempts?.[0]?.model, "claude-haiku-4.5");
+  });
+});
+
+describe("slow models: timeouts, low effort, and an early fallback", () => {
+  it("gives reasoning models longer limits and low effort, and others 20 s", () => {
+    const env = { XAI_API_KEY: "x", AI_GATEWAY_API_KEY: "g" };
+    const limits = Object.fromEntries(
+      ["grok-4.7", "grok-4.6", "grok-4.3", "gpt-6-astra", "gpt-4.1-mini", "claude-sonnet-5.5", "claude-haiku-4.5"].map((id) => {
+        const config = configForModel(id, env);
+        assert.ok(config, id);
+        return [id, timeoutFor(config)];
+      }),
+    );
+    assert.deepEqual(limits, {
+      "grok-4.7": 40_000,
+      "grok-4.6": 40_000,
+      "grok-4.3": 20_000,
+      "gpt-6-astra": 40_000,
+      "gpt-4.1-mini": 20_000,
+      "claude-sonnet-5.5": 35_000,
+      "claude-haiku-4.5": 20_000,
+    });
+    const grok = configForModel("grok-4.7", env);
+    assert.ok(grok);
+    const sent = body(buildProviderRequest(grok, "dogs", context).init);
+    assert.equal(sent.model, "grok-4.7");
+    assert.equal(sent.reasoning_effort, "low");
+    assert.equal(sent.max_completion_tokens, 4200);
+    assert.equal(sent.max_tokens, undefined);
+    assert.equal(sent.temperature, undefined);
+    const plain = body(buildProviderRequest(configForModel("grok-4.3", env)!, "dogs", context).init);
+    assert.equal(plain.reasoning_effort, undefined);
+    assert.equal(plain.max_tokens, 1200);
+  });
+
+  const reply = (model: string) => Response.json({ model, choices: [{ message: { content: `${model} [1].` } }] });
+  /** A fetch where each model answers (or hangs) after a set delay, honoring the abort signal. */
+  function timedFetch(delays: Record<string, number | "hang">) {
+    const started: string[] = [];
+    const fetcher = ((_url: string | URL, init?: RequestInit) => {
+      const model = String(body(init ?? {}).model);
+      started.push(model);
+      return new Promise<Response>((resolve, reject) => {
+        const signal = init?.signal;
+        const fail = () => reject(signal?.reason ?? Object.assign(new Error("aborted"), { name: "AbortError" }));
+        if (signal?.aborted) return fail();
+        // AbortSignal.timeout's timer doesn't keep Node alive; a real socket would, so this does.
+        const alive = setInterval(() => {}, 1000);
+        signal?.addEventListener("abort", () => (clearInterval(alive), fail()), { once: true });
+        const delay = delays[model] ?? 0;
+        if (delay !== "hang") setTimeout(() => (clearInterval(alive), resolve(reply(model))), delay);
+      });
+    }) as typeof fetch;
+    return { fetcher, started };
+  }
+
+  it("starts the fallback while a slow pick is still thinking, and uses it when the pick times out", async () => {
+    const { fetcher, started } = timedFetch({ "grok-4.7": "hang", "grok-4.3": 10 });
+    const t0 = Date.now();
+    const answer = await runAiAnswer("dogs", context, "grok-4.7", { env: { XAI_API_KEY: "x" }, fetcher, hedgeMs: 30, totalMs: 300, minCallMs: 20 });
+    assert.ok(answer.status === "ok");
+    assert.equal(answer.model, "grok-4.3");
+    assert.deepEqual(started, ["grok-4.7", "grok-4.3"]);
+    assert.deepEqual(answer.attempts?.map((a) => [a.model, a.kind]), [["grok-4.7", "timeout"]]);
+    assert.ok(Date.now() - t0 < 1000, "stays within the total budget");
+  });
+
+  it("still prefers the slow pick when it answers after the fallback started", async () => {
+    const { fetcher, started } = timedFetch({ "grok-4.7": 80, "grok-4.3": 10 });
+    const answer = await runAiAnswer("dogs", context, "grok-4.7", { env: { XAI_API_KEY: "x" }, fetcher, hedgeMs: 20, totalMs: 2000, minCallMs: 20 });
+    assert.ok(answer.status === "ok");
+    assert.equal(answer.model, "grok-4.7");
+    assert.deepEqual(answer.attempts, []);
+    assert.deepEqual(started, ["grok-4.7", "grok-4.3"]);
+  });
+
+  it("does not start a second call when the pick answers before the hedge point", async () => {
+    const { fetcher, started } = timedFetch({ "grok-4.7": 5 });
+    const answer = await runAiAnswer("dogs", context, "grok-4.7", { env: { XAI_API_KEY: "x" }, fetcher, hedgeMs: 200, totalMs: 2000, minCallMs: 20 });
+    assert.ok(answer.status === "ok" && answer.model === "grok-4.7");
+    assert.deepEqual(started, ["grok-4.7"]);
+  });
+
+  it("stops at the total budget and says which models ran out of time", async () => {
+    const { fetcher } = timedFetch({ "grok-4.7": "hang", "grok-4.3": "hang" });
+    const answer = await runAiAnswer("dogs", context, "grok-4.7", { env: { XAI_API_KEY: "x" }, fetcher, hedgeMs: 10, totalMs: 150, minCallMs: 100 });
+    assert.equal(answer.status, "error");
+    assert.deepEqual(answer.attempts?.map((a) => [a.model, a.kind]), [["grok-4.7", "timeout"], ["grok-4.3", "timeout"]]);
   });
 });

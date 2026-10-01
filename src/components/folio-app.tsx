@@ -24,6 +24,7 @@ import {
   AI_MESSAGES,
   AI_MODELS,
   aiModelLabelFor,
+  aiModelTimeoutMs,
   fallbackFailures,
   type AiAttempt,
   type AiFailureKind,
@@ -1285,6 +1286,14 @@ function AiAnswerCard({
 
   const answer = state?.key === key ? state.answer : null;
   const pending = !answer;
+  // After a few seconds, say how long the pick may take (slow reasoning models wait up to 40 s).
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    setSlow(false);
+    if (!pending) return;
+    const timer = setTimeout(() => setSlow(true), 8000);
+    return () => clearTimeout(timer);
+  }, [pending, key, attempt]);
 
   return (
     <section
@@ -1307,6 +1316,11 @@ function AiAnswerCard({
             <p className="text-sm text-muted">
               {selected ? fill(copy.asking, { model: modelLabel(selected) }) : copy.writing}
             </p>
+            {slow && selected ? (
+              <p className="mt-1 text-xs text-muted">
+                {fill(copy.aiSlow, { model: modelLabel(selected), seconds: String(Math.round(aiModelTimeoutMs(selected) / 1000)) })}
+              </p>
+            ) : null}
             <div className="mt-3 grid gap-2" aria-hidden="true">
               <div className="h-3.5 w-full animate-pulse rounded bg-line" />
               <div className="h-3.5 w-11/12 animate-pulse rounded bg-line" />
