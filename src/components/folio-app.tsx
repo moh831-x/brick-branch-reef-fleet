@@ -2249,7 +2249,7 @@ function ResultPeek({
           {translated?.partial && !native ? <p className="mt-2 text-sm text-muted">{copy.translatePartial}</p> : null}
           {shownSections.length > 0 ? (
             <div className="mt-4 sm:grid sm:grid-cols-[9.5rem_minmax(0,1fr)] sm:gap-4">
-              <nav aria-label={copy.contents} className="mb-4 sm:sticky sm:top-0 sm:mb-0 sm:max-h-[70vh] sm:overflow-y-auto">
+              <nav aria-label={copy.contents} className="mb-4 max-h-56 overflow-y-auto sm:sticky sm:top-0 sm:mb-0 sm:max-h-[70vh]">
                 <p className="text-xs tracking-widest text-muted uppercase">{copy.contents}</p>
                 <ol className="mt-2">
                   {shownSections.map((section) => (
@@ -2265,7 +2265,7 @@ function ResultPeek({
                           const top = target.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
                           scroller.scrollTo({ top: Math.max(0, top - 8), behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
                         }}
-                        className={`block w-full border-s-2 py-1.5 ps-2 text-start text-sm leading-snug ${
+                        className={`block min-h-11 w-full border-s-2 py-1.5 ps-2 text-start text-sm leading-snug ${
                           activeSection === section.id ? "border-ink text-ink" : "border-transparent text-muted"
                         }`}
                       >

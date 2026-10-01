@@ -1,6 +1,6 @@
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
-import { request } from 'node:https';
+import { request, type RequestOptions } from 'node:https';
 import { request as httpRequest } from 'node:http';
 
 export function publicAddress(address: string): boolean {
@@ -19,10 +19,12 @@ export async function fetchWebPage(value: string, redirects = 0): Promise<string
   if (!addresses.length || addresses.some(({ address }) => !publicAddress(address))) throw new Error('Private page');
   const chosen = addresses[0];
   return new Promise((resolve, reject) => {
-    const req = (url.protocol === 'https:' ? request : httpRequest)(url, {
+    const options: RequestOptions & { autoSelectFamily: boolean } = {
+      autoSelectFamily: false,
       headers: { Accept: 'text/html', 'User-Agent': 'Folio/1.0 (web result preview)', 'Accept-Encoding': 'identity' },
       lookup: (_host, _options, callback) => callback(null, chosen.address, chosen.family),
-    }, (response) => {
+    };
+    const req = (url.protocol === 'https:' ? request : httpRequest)(url, options, (response) => {
       if (response.statusCode && response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
         response.resume();
         if (redirects >= 3) return reject(new Error('Too many redirects'));
