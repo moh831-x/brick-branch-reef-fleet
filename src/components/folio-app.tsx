@@ -36,6 +36,7 @@ import { fill, sourceLabel, type UiCopy } from "@/lib/ui-copy";
 import { langDir, langInfo, PREVIEW_TRANSLATE_CHARS, type UiLang } from "@/lib/i18n";
 import { clickAction, factsOf, trackPresses } from "@/lib/select-click";
 import { useLang } from "@/lib/lang-context";
+import { MIN_CONTENTS } from "@/lib/reader";
 import { LanguagePicker } from "@/components/language-picker";
 import { shareNative, tap, useIsNativeApp } from "@/lib/native";
 
@@ -2007,6 +2008,123 @@ function unpackPreview(text: string): { lead: string; sections: PreviewSection[]
   return { lead: lead.join("\n").replace(/\n{3,}/g, "\n\n").trim(), sections };
 }
 
+/** Web results (except videos) and Wikipedia/Grokipedia hits load a fuller preview from the server. */
+function needsPreview(hit: SearchHit): boolean {
+  if (hit.source === "images") return false;
+  if (hit.source === "web") return !youtubeId(hit.url);
+  return true;
+}
+
+/** The section whose heading was passed last (a little below the top of the scroller), or the last one at the bottom. */
+function currentSection(scroller: HTMLElement, ids: string[]): string {
+  const top = scroller.getBoundingClientRect().top;
+  let current = ids[0] ?? "s-0";
+  for (const id of ids) {
+    const element = scroller.querySelector<HTMLElement>(`#peek-${id}`);
+    if (!element) continue;
+    if (element.getBoundingClientRect().top - top <= 56) current = id;
+    else break;
+  }
+  if (scroller.scrollTop > 0 && scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 4) current = ids[ids.length - 1] ?? current;
+  return current;
+}
+
+/**
+ * The Contents list beside a preview (Grokipedia, Wikipedia, and web pages read on the server):
+ * h2 entries with nested h3 entries, the current section marked by a bar on the reading-start side.
+ * On small screens it folds into a toggle. In a right-to-left page the grid puts it on the right.
+ */
+function PreviewContents({
+  sections,
+  active,
+  copy,
+  scrollerRef,
+  onPick,
+}: {
+  sections: PreviewSection[];
+  active: string;
+  copy: UiCopy;
+  scrollerRef: { current: HTMLDivElement | null };
+  onPick: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const listId = useId();
+  const navRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    // Keep the highlighted entry visible inside the (separately scrolling) list.
+    const nav = navRef.current;
+    const item = nav?.querySelector<HTMLElement>(`[data-section="${active}"]`);
+    if (!nav || !item || nav.scrollHeight <= nav.clientHeight) return;
+    const itemTop = item.offsetTop - nav.offsetTop;
+    if (itemTop < nav.scrollTop) nav.scrollTop = itemTop - 8;
+    else if (itemTop + item.offsetHeight > nav.scrollTop + nav.clientHeight) nav.scrollTop = itemTop + item.offsetHeight - nav.clientHeight + 8;
+  }, [active]);
+
+  return (
+    <nav ref={navRef} aria-label={copy.contents} className="mb-4 sm:sticky sm:top-0 sm:mb-0 sm:max-h-[70vh] sm:overflow-y-auto">
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls={listId}
+        onClick={() => setOpen((value) => !value)}
+        className="flex min-h-11 w-full items-center justify-between gap-2 rounded-xl border border-line px-3 text-start text-sm text-ink sm:hidden"
+      >
+        <span>
+          {copy.contents} <span className="text-muted tabular-nums">({sections.length})</span>
+        </span>
+        <span className="sr-only">{open ? copy.hideContents : copy.showContents}</span>
+        <ChevronDown className={`size-4 text-muted transition-transform ${open ? "rotate-180" : ""}`} aria-hidden="true" />
+      </button>
+      <p className="hidden text-xs tracking-widest text-muted uppercase sm:block">{copy.contents}</p>
+      <ol id={listId} className={`mt-2 ${open ? "block" : "hidden"} sm:block`}>
+        {sections.map((section) => (
+          <li key={section.id} className={section.level > 1 ? "ps-3" : ""}>
+            <button
+              type="button"
+              data-section={section.id}
+              aria-current={active === section.id ? "location" : undefined}
+              onClick={() => {
+                onPick(section.id);
+                setOpen(false);
+                const scroller = scrollerRef.current;
+                const target = scroller?.querySelector<HTMLElement>(`#peek-${section.id}`);
+                if (!scroller || !target) return;
+                const top = target.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
+                scroller.scrollTo({ top: Math.max(0, top - 8), behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+              }}
+              className={`block min-h-11 w-full border-s-2 py-1.5 ps-2 text-start leading-snug ${section.level > 1 ? "text-xs" : "text-sm"} ${
+                active === section.id ? "border-ink text-ink" : "border-transparent text-muted hover:text-ink"
+              }`}
+            >
+              {section.title}
+            </button>
+          </li>
+        ))}
+      </ol>
+    </nav>
+  );
+}
+
+function PreviewSections({ sections }: { sections: PreviewSection[] }) {
+  return (
+    <>
+      {sections.map((section) => (
+        <section key={section.id} id={`peek-${section.id}`} className="scroll-mt-2 pt-3">
+          <h3 dir="auto" className={section.level > 1 ? "text-base font-medium text-ink" : "font-display text-xl text-ink"}>
+            {section.title}
+          </h3>
+          {section.text ? (
+            <p dir="auto" className="mt-2 text-sm leading-relaxed text-ink">
+              {section.text}
+            </p>
+          ) : null}
+        </section>
+      ))}
+    </>
+  );
+}
+
 function ResultPeek({
   hit,
   index,
@@ -2045,7 +2163,7 @@ function ResultPeek({
     return () => window.removeEventListener("resize", fit);
   }, []);
   const [preview, setPreview] = useState<HitPreview | null>(null);
-  const [previewReady, setPreviewReady] = useState(hit.source === "images");
+  const [previewReady, setPreviewReady] = useState(!needsPreview(hit));
   const [translation, setTranslation] = useState<{ title: string; text: string; partial?: boolean } | null>(null);
   const [translating, setTranslating] = useState(false);
   /** Why the translation failed (from the server), or null. */
@@ -2059,7 +2177,8 @@ function ResultPeek({
   useEffect(() => {
     let cancelled = false;
     setPreview(null);
-    const immediate = hit.source === "images";
+    // Web results show their snippet at once while the page itself is read on the server.
+    const immediate = !needsPreview(hit);
     setPreviewReady(immediate);
     if (immediate) return;
     previewHit({ data: { source: hit.source, title: hit.title, url: hit.url, snippet: hit.snippet } })
@@ -2127,22 +2246,26 @@ function ResultPeek({
     setActiveSection(shownSections[0]?.id ?? "s-0");
   }, [hit.id, lang, shownSections[0]?.id]);
 
-  const sectionIds = shownSections.map((section) => section.id).join(",");
+  // Highlight the section being read while the preview scrolls.
+  const sectionKey = shownSections.length >= MIN_CONTENTS ? shownSections.map((section) => section.id).join("|") : "";
   useEffect(() => {
     const scroller = scrollerRef.current;
-    if (!scroller || !sectionIds) return;
+    if (!scroller || !sectionKey) return;
+    const ids = sectionKey.split("|");
+    let frame = 0;
     const update = () => {
-      const threshold = scroller.getBoundingClientRect().top + 48;
-      let current = sectionIds.split(",")[0];
-      for (const id of sectionIds.split(",")) {
-        const section = scroller.querySelector<HTMLElement>(`#peek-${id}`);
-        if (section && section.getBoundingClientRect().top <= threshold) current = id;
-      }
-      setActiveSection(current);
+      frame = 0;
+      setActiveSection(currentSection(scroller, ids));
     };
-    scroller.addEventListener("scroll", update, { passive: true });
-    return () => scroller.removeEventListener("scroll", update);
-  }, [sectionIds]);
+    const onScroll = () => {
+      if (!frame) frame = requestAnimationFrame(update);
+    };
+    scroller.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      scroller.removeEventListener("scroll", onScroll);
+      if (frame) cancelAnimationFrame(frame);
+    };
+  }, [sectionKey, hit.id]);
 
   useEffect(() => {
     // A new language drops the old translation so its text is never shown under the new buttons.
@@ -2299,46 +2422,28 @@ function ResultPeek({
             </p>
           ) : null}
           {translated?.partial && !native ? <p className="mt-2 text-sm text-muted">{copy.translatePartial}</p> : null}
-          {shownSections.length > 0 ? (
+          {hit.source === "web" && !previewReady ? <p className="mt-2 text-sm text-muted">{copy.readingPage}</p> : null}
+          {hit.source === "web" && preview?.reader === "unavailable" ? (
+            <p className="mt-2 text-sm text-muted" role="status">
+              {copy.pageUnavailable}
+            </p>
+          ) : null}
+          {shownSections.length >= MIN_CONTENTS ? (
             <div className="mt-4 sm:grid sm:grid-cols-[9.5rem_minmax(0,1fr)] sm:gap-4">
-              <nav aria-label={copy.contents} className="mb-4 max-h-56 overflow-y-auto sm:sticky sm:top-0 sm:mb-0 sm:max-h-[70vh]">
-                <p className="text-xs tracking-widest text-muted uppercase">{copy.contents}</p>
-                <ol className="mt-2">
-                  {shownSections.map((section) => (
-                    <li key={section.id} className={section.level > 1 ? "ps-3" : ""}>
-                      <button
-                        type="button"
-                        aria-current={activeSection === section.id ? "location" : undefined}
-                        onClick={() => {
-                          setActiveSection(section.id);
-                          const scroller = scrollerRef.current;
-                          const target = scroller?.querySelector<HTMLElement>(`#peek-${section.id}`);
-                          if (!scroller || !target) return;
-                          const top = target.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
-                          scroller.scrollTo({ top: Math.max(0, top - 8), behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
-                        }}
-                        className={`block min-h-11 w-full border-s-2 py-1.5 ps-2 text-start text-sm leading-snug ${
-                          activeSection === section.id ? "border-ink text-ink" : "border-transparent text-muted"
-                        }`}
-                      >
-                        {section.title}
-                      </button>
-                    </li>
-                  ))}
-                </ol>
-              </nav>
+              <PreviewContents
+                sections={shownSections}
+                active={activeSection}
+                copy={copy}
+                scrollerRef={scrollerRef}
+                onPick={setActiveSection}
+              />
               <div>
                 {leadParagraphs.map((part, partIndex) => (
                   <p key={`${hit.id}-lead-${partIndex}`} dir="auto" className="mb-3 text-sm leading-relaxed text-ink">
                     {part}
                   </p>
                 ))}
-                {shownSections.map((section) => (
-                  <section key={section.id} id={`peek-${section.id}`} className="scroll-mt-2 pt-3">
-                    <h3 dir="auto" className={section.level > 1 ? "text-base font-medium text-ink" : "font-display text-xl text-ink"}>{section.title}</h3>
-                    {section.text ? <p dir="auto" className="mt-2 text-sm leading-relaxed text-ink">{section.text}</p> : null}
-                  </section>
-                ))}
+                <PreviewSections sections={shownSections} />
               </div>
             </div>
           ) : (
@@ -2348,6 +2453,7 @@ function ResultPeek({
                   {part}
                 </p>
               ))}
+              <PreviewSections sections={shownSections} />
             </div>
           )}
           {hit.image ? (
