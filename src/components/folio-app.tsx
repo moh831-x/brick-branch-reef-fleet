@@ -139,7 +139,8 @@ function escapeRegExp(value: string): string {
 
 function Highlight({ text, query }: { text: string; query: string }) {
   const terms = [...new Set(query.toLowerCase().split(/\s+/).filter((term) => term.length > 1))];
-  if (!terms.length || !text) return <>{text}</>;
+  // Always an element, never a bare text node: browser translators swap text nodes out from under React.
+  if (!terms.length || !text) return <span>{text}</span>;
   const pattern = new RegExp(`(${terms.map(escapeRegExp).join("|")})`, "ig");
   const parts = text.split(pattern);
   return (
@@ -921,7 +922,7 @@ function DeepDive({
                       <span className="font-semibold">{rest}</span>
                     </>
                   ) : (
-                    item
+                    <span>{item}</span>
                   )}
                 </span>
               </button>
@@ -1056,7 +1057,8 @@ function Results({
                   </h2>
                   <p className="mt-1 text-sm text-muted">
                     {copy.searchFor} <span className="text-ink">“{query}”</span>
-                    {count ? ` — ${count}` : ""}
+                    {/* An element, not a bare text node that comes and goes: see src/lib/dom-guard.ts. */}
+                    {count ? <span> — {count}</span> : null}
                   </p>
                 </div>
                 {block.key === "grok" && data?.grokTranslateError ? (
@@ -1328,7 +1330,7 @@ function AiAnswerCard({
                       <SiteLogo url={cite.url} />
                       <span className="min-w-0 truncate">{cite.title}</span>
                       <span className="hidden shrink-0 text-xs text-muted sm:inline">
-                        {cite.source === "images" ? `${copy.image} · ` : ""}
+                        {cite.source === "images" ? <span>{copy.image} · </span> : null}
                         {siteHost(cite.url) || sourceLabel(copy, cite.source)}
                       </span>
                     </SelectableLink>
