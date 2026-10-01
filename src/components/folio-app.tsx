@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
+import { Fragment, useEffect, useId, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import { ArrowUp, ArrowUpRight, BookOpen, ChevronDown, ChevronLeft, ChevronRight, Clock, Compass, Globe, ImageIcon, Pause, Play, RotateCw, Search, Share, Sparkles, Square, TrendingUp, Volume2, X } from "lucide-react";
 import type { FolioSearch } from "@/routes/index";
@@ -2027,6 +2027,23 @@ function ResultPeek({
   const closeRef = useRef<HTMLButtonElement>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
+  const [peekWidth, setPeekWidth] = useState(512);
+  const resizeStart = useRef<{ x: number; width: number } | null>(null);
+  const clampWidth = (width: number) => Math.round(Math.min(Math.max(360, width), window.innerWidth));
+  const saveWidth = (width: number) => {
+    const next = clampWidth(width);
+    setPeekWidth(next);
+    try { localStorage.setItem("folio-preview-width", String(next)); } catch { /* Storage can be unavailable. */ }
+  };
+  useEffect(() => {
+    try {
+      const saved = Number(localStorage.getItem("folio-preview-width"));
+      if (Number.isFinite(saved) && saved >= 360) setPeekWidth(clampWidth(saved));
+    } catch { /* Use the default width. */ }
+    const fit = () => setPeekWidth((width) => clampWidth(width));
+    window.addEventListener("resize", fit);
+    return () => window.removeEventListener("resize", fit);
+  }, []);
   const [preview, setPreview] = useState<HitPreview | null>(null);
   const [previewReady, setPreviewReady] = useState(hit.source === "images");
   const [translation, setTranslation] = useState<{ title: string; text: string; partial?: boolean } | null>(null);
@@ -2165,8 +2182,43 @@ function ResultPeek({
         aria-labelledby={titleId}
         lang={lang}
         dir={rtl ? "rtl" : "ltr"}
-        className="folio-peek absolute inset-x-0 bottom-0 flex max-h-[88vh] flex-col rounded-t-3xl border border-line bg-surface sm:inset-y-0 sm:end-0 sm:start-auto sm:max-h-none sm:w-[min(32rem,100%)] sm:rounded-none sm:border-y-0 sm:border-e-0"
+        style={{ "--peek-width": `${peekWidth}px` } as CSSProperties}
+        className="folio-peek absolute inset-x-0 bottom-0 flex max-h-[88vh] flex-col rounded-t-3xl border border-line bg-surface sm:inset-y-0 sm:end-0 sm:start-auto sm:max-h-none sm:rounded-none sm:border-y-0 sm:border-e-0"
       >
+        <div
+          role="separator"
+          aria-label="Resize preview"
+          aria-orientation="vertical"
+          aria-valuemin={360}
+          aria-valuemax={typeof window === "undefined" ? 1920 : window.innerWidth}
+          aria-valuenow={peekWidth}
+          tabIndex={0}
+          title="Drag to resize · Arrow keys to adjust · Home to reset"
+          className="folio-peek-resize hidden sm:flex"
+          onPointerDown={(event) => {
+            if (event.button !== 0) return;
+            event.preventDefault();
+            event.currentTarget.setPointerCapture(event.pointerId);
+            resizeStart.current = { x: event.clientX, width: peekWidth };
+          }}
+          onPointerMove={(event) => {
+            const start = resizeStart.current;
+            if (start) setPeekWidth(clampWidth(start.width + (rtl ? 1 : -1) * (event.clientX - start.x)));
+          }}
+          onPointerUp={(event) => {
+            const start = resizeStart.current;
+            if (start) saveWidth(start.width + (rtl ? 1 : -1) * (event.clientX - start.x));
+            resizeStart.current = null;
+          }}
+          onLostPointerCapture={() => { resizeStart.current = null; }}
+          onKeyDown={(event) => {
+            if (event.key === "Home") { event.preventDefault(); saveWidth(512); }
+            if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+              event.preventDefault(); event.stopPropagation();
+              saveWidth(peekWidth + (event.key === "ArrowLeft" ? -1 : 1) * (rtl ? 1 : -1) * (event.shiftKey ? 80 : 24));
+            }
+          }}
+        ><span /></div>
         <div className="px-4 pt-2 sm:pt-4">
           <div className="mx-auto mb-2 h-1 w-10 rounded-full bg-line sm:hidden" aria-hidden="true" />
           <div className="flex items-center justify-between gap-2 pb-3">
