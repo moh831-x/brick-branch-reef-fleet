@@ -12,7 +12,7 @@ import {
 type Call = { url: string; model: string; system: string; user: string; maxTokens: number };
 
 /** A fake chat endpoint: `reply` decides each answer from the request. */
-function fakeFetch(reply: (call: Call) => { status?: number; content?: string }) {
+function fakeFetch(reply: (call: Call) => { status?: number; content?: string; finishReason?: string }) {
   const calls: Call[] = [];
   const fetcher = (async (url: string | URL | Request, init?: RequestInit) => {
     const body = JSON.parse(String(init?.body)) as {
@@ -31,7 +31,7 @@ function fakeFetch(reply: (call: Call) => { status?: number; content?: string })
     calls.push(call);
     const out = reply(call);
     const status = out.status ?? 200;
-    return new Response(JSON.stringify({ choices: [{ message: { content: out.content ?? "" } }], model: body.model }), {
+    return new Response(JSON.stringify({ choices: [{ finish_reason: out.finishReason, message: { content: out.content ?? "" } }], model: body.model }), {
       status,
     });
   }) as typeof fetch;
@@ -70,6 +70,7 @@ describe("readStringArray", () => {
   it("rejects replies that are not arrays", () => {
     assert.equal(readStringArray('{"a":1}'), null);
     assert.equal(readStringArray("no json"), null);
+    assert.equal(readStringArray('["valid", {"bad": true}]'), null);
   });
 });
 
@@ -106,6 +107,14 @@ describe("runTranslate", () => {
     assert.equal(out.title, "T:Paris");
     assert.equal(out.text, "T:Paris is a city.");
     assert.ok(calls.some((call) => call.model === "grok-4.3"));
+  });
+
+  it("does not treat a token-truncated passage as a finished translation", async () => {
+    const { fetcher } = fakeFetch(() => ({ content: "অসম্পূর্ণ", finishReason: "length" }));
+    await assert.rejects(
+      runTranslate({ lang: "bn-BD", title: "Title", text: "Full passage." }, { env: GROK_ONLY, fetcher }),
+      /truncated reply/,
+    );
   });
 
   it("says why when every provider fails", async () => {

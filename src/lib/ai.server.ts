@@ -228,7 +228,7 @@ export function buildProviderRequest(config: ProviderConfig, query: string, cont
   };
 }
 
-type ChatCompletion = { model?: string; choices?: Array<{ message?: { content?: string | null } }> };
+type ChatCompletion = { model?: string; choices?: Array<{ finish_reason?: string; message?: { content?: string | null } }> };
 type AnthropicMessage = { model?: string; content?: Array<{ type?: string; text?: string }> };
 
 /** Pull the answer text and model name out of a provider response. Exported for tests. */
@@ -351,7 +351,11 @@ async function translateCall(
         signal: AbortSignal.timeout(TRANSLATE_TIMEOUT_MS),
       });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const { raw } = readProviderResponse(config, await response.json());
+      const completion = await response.json();
+      if ((completion as ChatCompletion).choices?.[0]?.finish_reason === "length") {
+        throw new Error("truncated reply");
+      }
+      const { raw } = readProviderResponse(config, completion);
       const text = stripFences(raw);
       if (!text) throw new Error("empty reply");
       translateCooldown.delete(`${config.id}:${config.model}`);
@@ -484,7 +488,8 @@ export function readStringArray(raw: string): string[] | null {
   try {
     const parsed = JSON.parse(trimmed.slice(start, end + 1)) as unknown;
     if (!Array.isArray(parsed)) return null;
-    return parsed.map((value) => (typeof value === "string" ? value : String(value ?? "")));
+    if (!parsed.every((value) => typeof value === "string")) return null;
+    return parsed;
   } catch {
     return null;
   }
