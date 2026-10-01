@@ -1,3 +1,4 @@
+import { fetchWebPage, webArticleParts } from "./web-preview.server";
 import { GROK_PAGE, IMAGES_MAX_PAGE, IMAGES_PAGE, isLatinQuery, PAGE, relevantCount, WEB_PAGE } from "./search.shared";
 import { LANGS, langInfo, matchLang, wikiOrigin as wikiOriginFor, type UiLang } from "./i18n";
 
@@ -1334,6 +1335,10 @@ export async function runPreview(input: {
 }): Promise<HitPreview> {
   const fallback = previewFallback(input);
   try {
+    if (input.source === "web") {
+      const parts = webArticleParts(await fetchWebPage(input.url));
+      return { ...fallback, extract: parts.lead || fallback.extract, sections: parts.sections };
+    }
     if (input.source === "wiki") {
       const origin = wikiHost(input.url);
       const url = `${origin}/api/rest_v1/page/summary/${encodeURIComponent(input.title)}`;

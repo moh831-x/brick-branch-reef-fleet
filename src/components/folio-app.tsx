@@ -2028,7 +2028,7 @@ function ResultPeek({
   const scrollerRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
   const [preview, setPreview] = useState<HitPreview | null>(null);
-  const [previewReady, setPreviewReady] = useState(hit.source === "web" || hit.source === "images");
+  const [previewReady, setPreviewReady] = useState(hit.source === "images");
   const [translation, setTranslation] = useState<{ title: string; text: string; partial?: boolean } | null>(null);
   const [translating, setTranslating] = useState(false);
   /** Why the translation failed (from the server), or null. */
@@ -2042,7 +2042,7 @@ function ResultPeek({
   useEffect(() => {
     let cancelled = false;
     setPreview(null);
-    const immediate = hit.source === "web" || hit.source === "images";
+    const immediate = hit.source === "images";
     setPreviewReady(immediate);
     if (immediate) return;
     previewHit({ data: { source: hit.source, title: hit.title, url: hit.url, snippet: hit.snippet } })
@@ -2109,6 +2109,23 @@ function ResultPeek({
   useEffect(() => {
     setActiveSection(shownSections[0]?.id ?? "s-0");
   }, [hit.id, lang, shownSections[0]?.id]);
+
+  const sectionIds = shownSections.map((section) => section.id).join(",");
+  useEffect(() => {
+    const scroller = scrollerRef.current;
+    if (!scroller || !sectionIds) return;
+    const update = () => {
+      const threshold = scroller.getBoundingClientRect().top + 48;
+      let current = sectionIds.split(",")[0];
+      for (const id of sectionIds.split(",")) {
+        const section = scroller.querySelector<HTMLElement>(`#peek-${id}`);
+        if (section && section.getBoundingClientRect().top <= threshold) current = id;
+      }
+      setActiveSection(current);
+    };
+    scroller.addEventListener("scroll", update, { passive: true });
+    return () => scroller.removeEventListener("scroll", update);
+  }, [sectionIds]);
 
   useEffect(() => {
     // A new language drops the old translation so its text is never shown under the new buttons.
@@ -2239,13 +2256,14 @@ function ResultPeek({
                     <li key={section.id} className={section.level > 1 ? "ps-3" : ""}>
                       <button
                         type="button"
+                        aria-current={activeSection === section.id ? "location" : undefined}
                         onClick={() => {
                           setActiveSection(section.id);
                           const scroller = scrollerRef.current;
                           const target = scroller?.querySelector<HTMLElement>(`#peek-${section.id}`);
                           if (!scroller || !target) return;
                           const top = target.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
-                          scroller.scrollTo({ top: Math.max(0, top - 8), behavior: "smooth" });
+                          scroller.scrollTo({ top: Math.max(0, top - 8), behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
                         }}
                         className={`block w-full border-s-2 py-1.5 ps-2 text-start text-sm leading-snug ${
                           activeSection === section.id ? "border-ink text-ink" : "border-transparent text-muted"
@@ -2291,7 +2309,7 @@ function ResultPeek({
               <ArrowUpRight className="size-4" aria-hidden="true" />
             </a>
           ) : null}
-          {!preview && hit.source !== "web" && hit.source !== "images" ? <p className="mt-4 text-sm text-muted">{copy.loadingPreview}</p> : null}
+          {!previewReady ? <p className="mt-4 text-sm text-muted">{copy.loadingPreview}</p> : null}
         </div>
         <div className="flex gap-2 border-t border-line p-4">
           <a
