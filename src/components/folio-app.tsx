@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { Fragment, useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import { ArrowUp, ArrowUpRight, BookOpen, ChevronDown, ChevronLeft, ChevronRight, Clock, Compass, Globe, ImageIcon, Pause, Play, RotateCw, Search, Share, Sparkles, Square, TrendingUp, Volume2, X } from "lucide-react";
 import type { FolioSearch } from "@/routes/index";
@@ -34,6 +34,7 @@ import {
 import { SiteFooter } from "@/components/site-footer";
 import { fill, sourceLabel, type UiCopy } from "@/lib/ui-copy";
 import { langDir, langInfo, PREVIEW_TRANSLATE_CHARS, type UiLang } from "@/lib/i18n";
+import { clickAction, factsOf, trackPresses } from "@/lib/select-click";
 import { useLang } from "@/lib/lang-context";
 import { LanguagePicker } from "@/components/language-picker";
 import { shareNative, tap, useIsNativeApp } from "@/lib/native";
@@ -181,6 +182,11 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
   const [chrome, setChrome] = useState<"full" | "hidden" | "search">("full");
   // The language is picked on the home screen only; every other page follows that choice.
   const { lang: uiLang, copy } = useLang();
+  useEffect(() => {
+    // Lets result links tell a plain click from the end of a drag-selection.
+    trackPresses();
+  }, []);
+
   useEffect(() => {
     setAiModel(search.ai_model ?? readAiModel());
   }, [search.ai_model]);
@@ -751,6 +757,72 @@ function youtubeId(url: string): string | null {
   }
 }
 
+/** Props for links inside result text: not draggable (so a drag selects text), and not followed when a click ends a selection. */
+const selectSafeLink = {
+  draggable: false,
+  onClick: (event: ReactMouseEvent<HTMLAnchorElement>) => {
+    if (clickAction(factsOf(event)) === "ignore") event.preventDefault();
+  },
+} as const;
+
+/**
+ * Link-like text that can be drag-selected. Chrome never starts a text selection inside an
+ * `<a href>` (even with draggable=false), so result titles are a focusable span with the link role.
+ * A plain click or Enter runs `onOpen` (by default, opens `href` in a new tab); Ctrl/Cmd/Shift-click
+ * and middle-click open `href` in a new tab; a click that ends a drag or selection does nothing.
+ */
+function SelectableLink({
+  href,
+  onOpen,
+  className,
+  children,
+  focusable = true,
+  label,
+  current,
+  popup,
+}: {
+  href: string;
+  onOpen?: () => void;
+  className?: string;
+  children: ReactNode;
+  focusable?: boolean;
+  label?: string;
+  current?: boolean;
+  popup?: boolean;
+}) {
+  const newTab = () => window.open(href, "_blank", "noopener,noreferrer");
+  const open = onOpen ?? newTab;
+  return (
+    <span
+      role="link"
+      tabIndex={focusable ? 0 : -1}
+      aria-label={label}
+      aria-current={current ? "true" : undefined}
+      aria-haspopup={popup ? "dialog" : undefined}
+      onClick={(event) => {
+        const action = clickAction(factsOf(event));
+        if (action === "native") {
+          if (event.button === 0) newTab();
+          return;
+        }
+        if (action === "open") open();
+      }}
+      onAuxClick={(event) => {
+        if (event.button === 1) newTab();
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          open();
+        }
+      }}
+      className={`cursor-pointer ${className ?? ""}`}
+    >
+      {children}
+    </span>
+  );
+}
+
 function SiteLogo({ url }: { url: string }) {
   const host = siteHost(url);
   const [broken, setBroken] = useState(false);
@@ -770,6 +842,7 @@ function SiteLogo({ url }: { url: string }) {
           height={18}
           loading="lazy"
           decoding="async"
+          draggable={false}
           className="size-[18px]"
           onError={() => setBroken(true)}
         />
@@ -800,7 +873,7 @@ function Definitions({ items, copy }: { items: WordDefinition[]; copy: UiCopy })
               ))}
             </ul>
             {item.source ? (
-              <a href={item.source} className="mt-2 inline-flex min-h-11 items-center text-sm text-muted">
+              <a href={item.source} {...selectSafeLink} className="mt-2 inline-flex min-h-11 items-center text-sm text-muted">
                 WordNet
               </a>
             ) : null}
@@ -1008,32 +1081,38 @@ function Results({
                       <Fragment key={hit.id}>
                         <li className={`border-b border-line ${hit.id === openId ? "bg-accent-soft" : ""}`}>
                           <div className="flex items-start gap-1">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                tap("light");
-                                setOpenId(hit.id);
-                              }}
-                              aria-pressed={hit.id === openId}
-                              className="group min-w-0 flex-1 px-1 py-4 text-start"
-                            >
+                            {/* Plain text, not a button: browsers will not start a text selection inside a button.
+                                The title link opens the preview on a plain click; a drag or selection never does. */}
+                            <div className="min-w-0 flex-1 px-1 py-4 text-start">
                               <p className="flex items-center gap-2 text-xs tracking-wide text-muted uppercase">
                                 <SiteLogo url={hit.url} />
                                 <span className="min-w-0 truncate">{hit.meta}</span>
                               </p>
-                              <p dir="auto" className="mt-1 font-display text-xl leading-snug text-ink group-hover:text-accent">
-                                <Highlight text={hit.title} query={query} />
+                              <p dir="auto" className="mt-1 font-display text-xl leading-snug text-ink">
+                                <SelectableLink
+                                  href={hit.url}
+                                  popup
+                                  current={hit.id === openId}
+                                  onOpen={() => {
+                                    tap("light");
+                                    setOpenId(hit.id);
+                                  }}
+                                  className="hover:text-accent focus-visible:text-accent"
+                                >
+                                  <Highlight text={hit.title} query={query} />
+                                </SelectableLink>
                               </p>
                               {hit.snippet ? (
                                 <p dir="auto" className="mt-1 line-clamp-2 text-sm leading-relaxed text-muted">
                                   <Highlight text={hit.snippet} query={query} />
                                 </p>
                               ) : null}
-                            </button>
+                            </div>
                             <a
                               href={hit.url}
                               target="_blank"
                               rel="noreferrer"
+                              {...selectSafeLink}
                               aria-label={fill(copy.openNew, { title: hit.title })}
                               className="mt-3 grid size-11 shrink-0 place-items-center rounded-full text-muted hover:text-accent"
                             >
@@ -1240,12 +1319,7 @@ function AiAnswerCard({
               <ol className="mt-4 grid grid-cols-[minmax(0,1fr)] gap-1 border-t border-line pt-3">
                 {answer.citations.map((cite) => (
                   <li key={cite.n}>
-                    <a
-                      href={cite.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="flex min-h-11 items-center gap-2 text-sm text-ink hover:text-accent"
-                    >
+                    <SelectableLink href={cite.url} className="flex min-h-11 items-center gap-2 text-sm text-ink hover:text-accent">
                       <span className="grid size-6 shrink-0 place-items-center rounded-full bg-accent-soft text-xs font-medium text-accent tabular-nums">
                         {cite.n}
                       </span>
@@ -1255,7 +1329,7 @@ function AiAnswerCard({
                         {cite.source === "images" ? `${copy.image} · ` : ""}
                         {siteHost(cite.url) || sourceLabel(copy, cite.source)}
                       </span>
-                    </a>
+                    </SelectableLink>
                   </li>
                 ))}
               </ol>
@@ -1441,6 +1515,7 @@ function AiText({
               href={cite.url}
               target="_blank"
               rel="noreferrer"
+              {...selectSafeLink}
               aria-label={fill(copy.sourceN, { n: String(cite.n), title: cite.title })}
               className="inline-block rounded-full bg-accent-soft px-[0.4em] py-[0.15em] text-[0.7rem] leading-none font-medium text-accent tabular-nums hover:bg-accent hover:text-bg"
             >
@@ -1478,7 +1553,13 @@ function ImageGrid({
               open ? "border-accent ring-2 ring-accent" : "border-line"
             }`}
           >
-            <button type="button" onClick={() => onOpen(hit.id)} aria-pressed={open} className="block w-full text-start">
+            <button
+              type="button"
+              onClick={() => onOpen(hit.id)}
+              aria-pressed={open}
+              aria-label={hit.title}
+              className="block w-full text-start"
+            >
               <span className="block aspect-[4/3] overflow-hidden bg-line">
                 {hit.image ? (
                   <img
@@ -1487,24 +1568,32 @@ function ImageGrid({
                     loading="lazy"
                     decoding="async"
                     referrerPolicy="no-referrer"
+                    draggable={false}
                     className="h-full w-full object-cover transition-transform duration-200 ease-out group-hover:scale-[1.03]"
                   />
                 ) : null}
               </span>
-              <span className="block px-3 pt-2 pb-3">
-                <span className="line-clamp-2 text-sm leading-snug text-ink group-hover:text-accent">
-                  <Highlight text={hit.title} query={query} />
-                </span>
-                <span className="mt-1.5 flex items-center gap-1.5 text-xs text-muted">
-                  <SiteLogo url={hit.url} />
-                  <span className="min-w-0 truncate">{siteHost(hit.url)}</span>
-                </span>
-              </span>
             </button>
+            {/* The caption is plain text (outside the button) so it can be selected and copied. */}
+            <div className="block px-3 pt-2 pb-3 text-start">
+              <SelectableLink
+                href={hit.url}
+                focusable={false}
+                onOpen={() => onOpen(hit.id)}
+                className="line-clamp-2 text-sm leading-snug text-ink group-hover:text-accent"
+              >
+                <Highlight text={hit.title} query={query} />
+              </SelectableLink>
+              <span className="mt-1.5 flex items-center gap-1.5 text-xs text-muted">
+                <SiteLogo url={hit.url} />
+                <span className="min-w-0 truncate">{siteHost(hit.url)}</span>
+              </span>
+            </div>
             <a
               href={hit.url}
               target="_blank"
               rel="noreferrer"
+              {...selectSafeLink}
               aria-label={fill(copy.openNew, { title: hit.title })}
               className="absolute top-1 end-1 grid size-11 place-items-center"
             >
@@ -2387,13 +2476,13 @@ function PlaceList({ places, error, copy }: { places: PlaceRef[]; error?: string
             <li key={place.id} className="grid grid-cols-[1.5rem_minmax(0,1fr)] gap-2 border-b border-line py-3 last:border-b-0">
               <span className="font-display text-muted tabular-nums">{index + 1}</span>
               <div className="min-w-0">
-                <a href={place.url} target="_blank" rel="noreferrer" className="font-medium text-ink hover:text-accent">
+                <SelectableLink href={place.url} className="font-medium text-ink hover:text-accent">
                   {place.name}
-                </a>
+                </SelectableLink>
                 <p className="mt-0.5 text-sm leading-relaxed text-muted">{place.detail}</p>
                 <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">
                   <span className="tabular-nums">{formatCoord(place.lat, place.lon)}</span>
-                  <a href={place.map} target="_blank" rel="noreferrer" className="font-medium text-ink">
+                  <a href={place.map} target="_blank" rel="noreferrer" {...selectSafeLink} className="font-medium text-ink">
                     {copy.map}
                   </a>
                   <span>{place.source === "wiki" ? copy.wiki : "GeoNames"}</span>
@@ -2425,6 +2514,7 @@ function Lead({ card, copy }: { card: NonNullable<SearchPayload["card"]>; copy: 
       <p className="mt-3 text-sm leading-relaxed text-muted">{card.extract}</p>
       <a
         href={card.url}
+        {...selectSafeLink}
         className="mt-4 inline-flex min-h-11 items-center gap-1 text-sm font-medium text-ink"
       >
         {copy.readArticle}
