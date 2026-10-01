@@ -5,7 +5,12 @@ import { NativeShell } from "@/components/native-shell";
 import { LangProvider } from "@/lib/lang";
 import { useLang } from "@/lib/lang-context";
 import { detectLang } from "@/lib/lang-state";
+import { DEFAULT_LANG } from "@/lib/i18n";
+import { installBrowserDomGuard } from "@/lib/dom-guard";
 import appCss from "../styles.css?url";
+
+// Before React hydrates: keep page translators from crashing React (see dom-guard.ts).
+installBrowserDomGuard();
 
 export const Route = createRootRoute({
   // The page language, so the server renders the right words, `lang`, and `dir` the first time.
@@ -43,9 +48,13 @@ function RootComponent() {
 
 function RootDocument() {
   const { lang, dir } = useLang();
+  // In a language Folio translates itself, ask browsers not to translate the page on top of it.
+  // English pages stay translatable for readers whose language Folio does not offer.
+  const ownTranslation = lang !== DEFAULT_LANG;
   return (
-    <html lang={lang} dir={dir} suppressHydrationWarning>
+    <html lang={lang} dir={dir} translate={ownTranslation ? "no" : undefined} suppressHydrationWarning>
       <head>
+        {ownTranslation ? <meta name="google" content="notranslate" /> : null}
         <HeadContent />
         <script
           async

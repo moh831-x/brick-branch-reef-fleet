@@ -2,6 +2,8 @@ import { createFileRoute, stripSearchParams } from "@tanstack/react-router";
 import { FolioApp } from "@/components/folio-app";
 import { searchAll } from "@/lib/search.functions";
 import { aiChoiceOf } from "@/lib/ai.shared";
+import { DEFAULT_LANG, matchLang } from "@/lib/i18n";
+import { UI } from "@/lib/ui-copy";
 import { GROK_PAGE, IMAGES_MAX_PAGE, IMAGES_PAGE, PAGE, WEB_PAGE, pageOf } from "@/lib/search.shared";
 
 const HOME_TITLE = "Folio by Zip1 — Web, Wikipedia & Grokipedia Search";
@@ -104,8 +106,10 @@ export const Route = createFileRoute("/")({
       },
     });
   },
-  head: ({ match }) => {
+  head: ({ match, matches }) => {
     const q = match.search.q.trim();
+    // The root loader picks the page language; the first render's title and description follow it.
+    const copy = UI[matchLang(String(matches[0]?.loaderData ?? "")) ?? DEFAULT_LANG];
     if (q) {
       return {
         meta: [
@@ -116,8 +120,8 @@ export const Route = createFileRoute("/")({
     }
     return {
       meta: [
-        { title: HOME_TITLE },
-        { name: "description", content: HOME_DESCRIPTION },
+        { title: copy.homeTitle || HOME_TITLE },
+        { name: "description", content: copy.blurb || HOME_DESCRIPTION },
       ],
       links: [{ rel: "canonical", href: HOME_URL }],
       scripts: [{ type: "application/ld+json", children: JSON.stringify(websiteJsonLd) }],
