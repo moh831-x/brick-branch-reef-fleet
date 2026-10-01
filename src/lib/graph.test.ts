@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { buildPlot, evaluate, formatExpression, graphSuggestions, parseExpression, parseGraphQuery, ticks } from "./graph.ts";
+import { buildPlot, cleanGraphQuery, evaluate, formatExpression, graphSuggestions, parseExpression, parseGraphQuery, ticks } from "./graph.ts";
 
 const at = (source: string, x: number) => {
   const node = parseExpression(source);
@@ -80,6 +80,40 @@ describe("graph searches", () => {
     assert.deepEqual(labels("y = x and y = x^2 and y = x^3"), ["y = x", "y = x²", "y = x³"]);
   });
 
+  it("ignores quote marks, end punctuation, and polite filler", () => {
+    for (const query of [
+      "y = x^2",
+      '"y = x^2"',
+      "“y = x^2”",
+      "‘y = x^2’",
+      "'y = x^2'",
+      "`y = x^2`",
+      "「y = x^2」",
+      "«y = x^2»",
+      "„y = x^2“",
+      "y = x^2?",
+      "y = x^2.",
+      "y = x^2!",
+      '"y = x^2"?',
+      'graph "x^2"',
+      "y=x²",
+      "graph of x^2",
+      "x^2 graph",
+      "plot y = x^2 please",
+      "please plot y = x^2",
+      "can you graph x^2 for me?",
+      "show me y = x^2",
+      "what does y=x^2 look like",
+      "what does y = x^2 look like?",
+      "what is the graph of x^2?",
+    ]) {
+      assert.deepEqual(labels(query), ["y = x²"], query);
+    }
+    assert.equal(cleanGraphQuery(' "y = x^2" ?! '), "y = x^2");
+    assert.equal(cleanGraphQuery("-x^2 graph"), "-x^2 graph", "a leading minus is math, not punctuation");
+    assert.deepEqual(labels("graph x^2 from -10 to 10."), ["y = x²"]);
+  });
+
   it("leaves normal searches alone", () => {
     for (const query of [
       "graph theory",
@@ -98,6 +132,14 @@ describe("graph searches", () => {
       "Dubai",
       "sin",
       "graph x^2 + y^2 = 1",
+      '"graph theory"',
+      "graph theory?",
+      '"X (Twitter) graph"',
+      "x graph?",
+      "what does x look like",
+      "what does the new x logo look like",
+      "please",
+      '""',
     ]) {
       assert.equal(parseGraphQuery(query), null, query);
     }

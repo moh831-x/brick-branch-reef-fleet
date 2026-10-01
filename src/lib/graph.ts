@@ -466,6 +466,33 @@ export function formatExpression(node: GraphNode): string {
   }
 }
 
+/** Quote marks people put around a formula: straight, curly, low, angle, corner, full-width, backtick. */
+const QUOTES = /["'`“”‘’‚„‟‹›«»「」『』〝〞＂＇]/g;
+/** Politeness and filler around the request. */
+const POLITE_LEAD = /^(?:(?:please|pls|can you|could you|would you|will you|kindly|show me|show|display|help me|i want to see|let me see)\s+)+/i;
+const POLITE_TRAIL = /(?:\s+(?:please|pls|for me|thanks|thank you))+$/i;
+const LOOKS_LIKE = /^(?:what\s+(?:does|do|would|will)\s+(.+?)\s+look\s+like|what\s+is\s+the\s+(?:graph|plot)\s+of\s+(.+))$/i;
+
+/**
+ * Tidy a search before reading it as math: fold look-alike characters, drop quote marks anywhere
+ * ('"y = x^2"', '「y = x^2」'), polite filler ("please", "can you"), and end punctuation ("?", ".").
+ * Exported for tests.
+ */
+export function cleanGraphQuery(query: string): string {
+  let text = normalizeMath(query).replace(QUOTES, " ").replace(/\s+/g, " ").trim();
+  for (let pass = 0; pass < 3; pass += 1) {
+    const before = text;
+    text = text
+      .replace(/[\s?.!。？！…]+$/u, "")
+      .replace(POLITE_LEAD, "")
+      .replace(POLITE_TRAIL, "")
+      .replace(/^[\s:：]+/, "")
+      .trim();
+    if (text === before) break;
+  }
+  return text;
+}
+
 const MAX_FUNCTIONS = 5;
 const MAX_LENGTH = 160;
 
@@ -475,9 +502,16 @@ const MAX_LENGTH = 160;
  * math in x.
  */
 export function parseGraphQuery(query: string): GraphRequest | null {
-  let text = normalizeMath(query).replace(/\s+/g, " ").trim();
+  let text = cleanGraphQuery(query);
   if (!text || text.length > MAX_LENGTH) return null;
   let asked: boolean | "trail" = false;
+  // "what does y=x^2 look like", "what is the graph of x^2": a request, but "what does x look like"
+  // is more likely about X, so a lone x needs "y =" (same rule as a trailing "graph").
+  const looks = LOOKS_LIKE.exec(text);
+  if (looks) {
+    text = (looks[1] ?? looks[2] ?? "").trim();
+    asked = "trail";
+  }
   const lead = LEAD.exec(text);
   if (lead) {
     text = text.slice(lead[0].length).trim();
@@ -486,10 +520,10 @@ export function parseGraphQuery(query: string): GraphRequest | null {
     const trail = TRAIL.exec(text);
     if (trail) {
       text = text.slice(0, trail.index).trim();
-      asked = "trail";
+      asked ||= "trail";
     }
   }
-  text = text.replace(/^(?:the\s+)?(?:function|equation|line|curve)\s+/i, "").trim();
+  text = text.replace(/^(?:the\s+)?(?:graph|plot)\s+of\s+/i, "").replace(/^(?:the\s+)?(?:function|equation|line|curve)\s+/i, "").trim();
 
   let xMin = -5;
   let xMax = 5;
