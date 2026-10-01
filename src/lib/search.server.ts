@@ -1,4 +1,5 @@
 import { GROK_PAGE, IMAGES_MAX_PAGE, IMAGES_PAGE, PAGE, WEB_PAGE } from "./search.shared";
+import { LANGS, langInfo, matchLang, wikiOrigin as wikiOriginFor, type UiLang } from "./i18n";
 
 export type SourceId = "web" | "wiki" | "grok" | "images";
 
@@ -64,6 +65,10 @@ export type SearchPayload = {
   /** Set when the web and Wikipedia search used a translation of `query`. */
   searched?: string;
   lang?: SearchLang;
+  /** Set when Grokipedia (English only) was searched with an English translation of `query`. */
+  grokSearched?: string;
+  /** The page language this search ran for. */
+  pageLang?: UiLang;
   definitions: WordDefinition[];
   deepDive: string[];
 };
@@ -80,7 +85,7 @@ export type SearchInput = {
   imagesOffset: number;
   card: boolean;
   near: string;
-  /** Preferred preview language. English and unknown values search the query as typed. */
+  /** The page language. English and unknown values search the query as typed. */
   lang?: string;
 };
 
@@ -127,23 +132,30 @@ export type Trend = {
 
 const UA = "Mozilla/5.0 (compatible; Folio/1.0; personal research reader)";
 
-const SEARCH_LANG = {
-  "zh-CN": { wiki: "https://zh.wikipedia.org", setlang: "zh-Hans", mkt: "zh-CN", name: "Simplified Chinese" },
-  "hi-IN": { wiki: "https://hi.wikipedia.org", setlang: "hi", mkt: "hi-IN", name: "Hindi" },
-  "bn-BD": { wiki: "https://bn.wikipedia.org", setlang: "bn", mkt: "bn-BD", name: "Bangla" },
-} as const;
+/**
+ * A page language other than English. English searches run exactly as typed, with Bing's and
+ * Wikipedia's defaults; every other language searches its own Wikipedia edition and asks Bing
+ * for that language and market.
+ */
+export type SearchLang = Exclude<UiLang, "en-US">;
 
-export type SearchLang = keyof typeof SEARCH_LANG;
+export const SEARCH_LANGS: readonly SearchLang[] = LANGS.map((item) => item.code).filter(
+  (code): code is SearchLang => code !== "en-US",
+);
 
 export function asSearchLang(value: string | undefined): SearchLang | null {
-  if (value && value in SEARCH_LANG) return value as SearchLang;
-  return null;
+  const lang = matchLang(value);
+  return lang && lang !== "en-US" ? lang : null;
 }
 
 function bingMarket(lang: SearchLang | null): string {
   if (!lang) return "";
-  const row = SEARCH_LANG[lang];
-  return `&setlang=${row.setlang}&mkt=${encodeURIComponent(row.mkt)}`;
+  const row = langInfo(lang);
+  return `&setlang=${encodeURIComponent(row.setlang)}&mkt=${encodeURIComponent(row.mkt)}`;
+}
+
+function wikiOriginOf(lang: SearchLang | null): string {
+  return wikiOriginFor(lang ?? "en-US");
 }
 
 function wikiHost(url: string): string {
@@ -721,11 +733,11 @@ function mentionsQuery(query: string, name: string, region: string): boolean {
   return tokens.every((token) => words.includes(token));
 }
 
-async function mapPlaces(query: string, near: string): Promise<PlaceRef[]> {
+async function mapPlaces(query: string, near: string, lang: SearchLang | null = null): Promise<PlaceRef[]> {
   const q = [query, near].filter(Boolean).join(" ").trim();
   if (!q) return [];
   const data = await getJson<{ results?: MeteoPlace[] }>(
-    `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(q)}&count=10&language=en&format=json`,
+    `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(q)}&count=10&language=${lang ? langInfo(lang).wiki : "en"}&format=json`,
   );
   const rows = [...(data.results ?? [])].sort((a, b) => (b.population ?? 0) - (a.population ?? 0));
   const places: PlaceRef[] = [];
@@ -775,10 +787,10 @@ function mergePlaces(groups: PlaceRef[][]): PlaceRef[] {
   return places;
 }
 
-async function searchPlaces(query: string, near: string): Promise<PlaceRef[]> {
+async function searchPlaces(query: string, near: string, lang: SearchLang | null = null): Promise<PlaceRef[]> {
   const q = query.trim();
   if (!q && !near.trim()) return [];
-  const [wikiResult, mapResult] = await Promise.allSettled([wikiSummaryPlace(q), mapPlaces(q, near)]);
+  const [wikiResult, mapResult] = await Promise.allSettled([wikiSummaryPlace(q), mapPlaces(q, near, lang)]);
   const wiki = wikiResult.status === "fulfilled" && wikiResult.value ? [wikiResult.value] : [];
   const maps = mapResult.status === "fulfilled" ? mapResult.value : [];
   const places = mergePlaces([wiki, maps]);
@@ -857,8 +869,8 @@ async function defineQuery(query: string): Promise<WordDefinition[]> {
   return found.filter((item): item is WordDefinition => item !== null).slice(0, 2);
 }
 
-async function readDeepDive(query: string): Promise<string[]> {
-  const url = `https://api.bing.com/osjson.aspx?query=${encodeURIComponent(query)}`;
+async function readDeepDive(query: string, lang: SearchLang | null = null): Promise<string[]> {
+  const url = `https://api.bing.com/osjson.aspx?query=${encodeURIComponent(query)}${lang ? `&mkt=${encodeURIComponent(langInfo(lang).mkt)}` : ""}`;
   const data = await getJson<[string, string[]]>(url);
   const rows = Array.isArray(data?.[1]) ? data[1] : [];
   const base = query.trim().toLowerCase();
@@ -898,27 +910,28 @@ export async function runSearch(input: SearchInput): Promise<SearchPayload> {
   }
   const lang = asSearchLang(input.lang);
   let searched = query;
+  let grokQuery = query;
   if (lang) {
-    try {
-      const { runTranslate } = await import("./ai.server");
-      const translated = await runTranslate({ lang, title: query, text: query });
-      const next = translated.title.replace(/\s+/g, " ").trim();
-      if (next) searched = next;
-    } catch {
-      searched = query;
-    }
+    // Web and Wikipedia search in the page language. Grokipedia only has English pages, so it
+    // gets an English rendering of the query. Either translation falls back to the words typed.
+    const { runTranslate } = await import("./ai.server");
+    const translate = (target: UiLang) =>
+      runTranslate({ lang: target, title: query, text: query })
+        .then((row) => row.title.replace(/\s+/g, " ").trim() || query)
+        .catch(() => query);
+    [searched, grokQuery] = await Promise.all([translate(lang), input.grok ? translate("en-US") : Promise.resolve(query)]);
   }
-  const wikiOrigin = lang ? SEARCH_LANG[lang].wiki : "https://en.wikipedia.org";
+  const wikiOrigin = wikiOriginOf(lang);
 
   const [web, wikiOutcome, grok, images, definitions, deepDive] = await Promise.all([
     input.web ? searchWeb(searched, input.webOffset, input.near, lang).catch(failed) : Promise.resolve(emptyBlock()),
     input.wiki
       ? searchWiki(searched, input.wikiOffset, wikiOrigin).catch((error) => ({ block: failed(error), places: [] as PlaceRef[] }))
       : Promise.resolve({ block: emptyBlock(), places: [] as PlaceRef[] }),
-    input.grok ? searchGrok(query, input.grokOffset).catch(failed) : Promise.resolve(emptyBlock()),
+    input.grok ? searchGrok(grokQuery, input.grokOffset).catch(failed) : Promise.resolve(emptyBlock()),
     input.images ? searchImages(searched, input.imagesOffset, lang).catch(failed) : Promise.resolve(emptyBlock()),
     defineQuery(input.card ? query : ""),
-    input.web && input.webOffset === 0 ? readDeepDive(searched).catch(() => []) : Promise.resolve([]),
+    input.web && input.webOffset === 0 ? readDeepDive(searched, lang).catch(() => []) : Promise.resolve([]),
   ]);
   const wiki = wikiOutcome.block;
 
@@ -934,7 +947,7 @@ export async function runSearch(input: SearchInput): Promise<SearchPayload> {
     const lead =
       input.grokOffset === 0
         ? grok.results[0]
-        : (await searchGrok(query, 0).catch(() => emptyBlock())).results[0];
+        : (await searchGrok(grokQuery, 0).catch(() => emptyBlock())).results[0];
     if (lead) {
       card = {
         source: "grok",
@@ -950,7 +963,7 @@ export async function runSearch(input: SearchInput): Promise<SearchPayload> {
   let placesError: string | undefined;
   if (input.card) {
     try {
-      places = mergePlaces([wikiOutcome.places, await searchPlaces(query, input.near)]);
+      places = mergePlaces([wikiOutcome.places, await searchPlaces(query, input.near, lang)]);
     } catch (error) {
       places = wikiOutcome.places;
       if (!places.length) placesError = error instanceof Error ? error.message : "Unavailable";
@@ -969,6 +982,8 @@ export async function runSearch(input: SearchInput): Promise<SearchPayload> {
     placesError,
     near: input.near,
     ...(lang && searched !== query ? { searched, lang } : {}),
+    ...(lang && grokQuery !== query ? { grokSearched: grokQuery } : {}),
+    pageLang: lang ?? "en-US",
     definitions,
     deepDive,
   };
@@ -976,12 +991,12 @@ export async function runSearch(input: SearchInput): Promise<SearchPayload> {
 
 type OpenSearch = [string, string[], string[], string[]];
 
-export async function runSuggest(query: string): Promise<Suggestion[]> {
+export async function runSuggest(query: string, lang: SearchLang | null = null): Promise<Suggestion[]> {
   const q = query.trim();
   if (q.length < 2) return [];
 
   const wikiUrl =
-    "https://en.wikipedia.org/w/api.php?action=opensearch&format=json&limit=5&namespace=0" +
+    `${wikiOriginOf(lang)}/w/api.php?action=opensearch&format=json&limit=5&namespace=0` +
     `&search=${encodeURIComponent(q)}`;
   const grokUrl = `https://grokipedia.com/api/typeahead?query=${encodeURIComponent(q)}&limit=5`;
 

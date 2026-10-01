@@ -2,9 +2,14 @@ import { createRootRoute, HeadContent, Outlet, Scripts } from "@tanstack/react-r
 import { AuthProvider } from "@/lib/auth/provider";
 import { PreviewHostBridge } from "@/components/preview-host-bridge";
 import { NativeShell } from "@/components/native-shell";
+import { LangProvider } from "@/lib/lang";
+import { useLang } from "@/lib/lang-context";
+import { detectLang } from "@/lib/lang-state";
 import appCss from "../styles.css?url";
 
 export const Route = createRootRoute({
+  // The page language, so the server renders the right words, `lang`, and `dir` the first time.
+  loader: () => detectLang(),
   head: () => ({
     meta: [
       { charSet: "utf-8" },
@@ -24,8 +29,22 @@ export const Route = createRootRoute({
       { rel: "apple-touch-icon", href: "/__grok/icon-180.png" },
     ],
   }),
-  component: () => (
-    <html lang="en" suppressHydrationWarning>
+  component: RootComponent,
+});
+
+function RootComponent() {
+  const initial = Route.useLoaderData();
+  return (
+    <LangProvider initial={initial}>
+      <RootDocument />
+    </LangProvider>
+  );
+}
+
+function RootDocument() {
+  const { lang, dir } = useLang();
+  return (
+    <html lang={lang} dir={dir} suppressHydrationWarning>
       <head>
         <HeadContent />
         <script
@@ -43,5 +62,5 @@ export const Route = createRootRoute({
         <Scripts />
       </body>
     </html>
-  ),
-});
+  );
+}

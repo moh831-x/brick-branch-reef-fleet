@@ -31,6 +31,7 @@ import {
   type AiProviderStatus,
   type AnswerProviderId,
 } from "./ai.shared.ts";
+import { LANGS } from "./i18n.ts";
 
 type Env = Record<string, string | undefined>;
 
@@ -245,11 +246,8 @@ export function readProviderResponse(config: ProviderConfig, body: unknown): { r
   return { raw: completion.choices?.[0]?.message?.content?.trim() ?? "", model: completion.model || config.model };
 }
 
-const TRANSLATE_NAMES: Record<string, string> = {
-  "zh-CN": "Simplified Chinese",
-  "hi-IN": "Hindi",
-  "bn-BD": "Bangla",
-};
+/** Every page language, English included (Grokipedia queries are translated into English). */
+const TRANSLATE_NAMES: Record<string, string> = Object.fromEntries(LANGS.map((item) => [item.code, item.english]));
 
 /** Pull a translation object out of a model reply. Exported for tests. */
 export function readTranslation(raw: string): { title: string; text: string } | null {

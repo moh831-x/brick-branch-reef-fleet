@@ -2,7 +2,8 @@ import { createServerFn } from "@tanstack/react-start";
 import { GROK_PAGE, IMAGES_PAGE, MAX_PAGE, PAGE, WEB_PAGE } from "./search.shared";
 import { AI_MAX_CONTEXT, aiChoiceOf, cleanContextItem, type AiAnswer, type AiContextItem, type AiModelStatus } from "./ai.shared";
 import { aiModelStatus, runAiAnswer, runTranslate } from "./ai.server";
-import { asSearchLang, runPreview, runSearch, runSuggest, runTrending, type HitPreview, type SearchInput, type SearchPayload, type SourceId, type Suggestion, type Trend } from "./search.server";
+import { LANG_COOKIE, languageName, matchLang, pickLang, parseAcceptLanguage, type UiLang } from "./i18n";
+import { SEARCH_LANGS, asSearchLang, runPreview, runSearch, runSuggest, runTrending, type HitPreview, type SearchInput, type SearchPayload, type SourceId, type Suggestion, type Trend } from "./search.server";
 
 export type { HitPreview, ImageRef, LeadCard, PlaceRef, PreviewSection, SearchHit, SearchInput, SearchPayload, SourceBlock, SourceId, Suggestion, Trend, WordDefinition, WordSense } from "./search.server";
 
@@ -33,29 +34,28 @@ function readSearch(input: unknown): SearchInput {
     imagesOffset: offsetOf(raw.imagesOffset),
     card: raw.card !== false,
     near: typeof raw.near === "string" ? raw.near.trim().slice(0, 80) : "",
+    ...(typeof raw.lang === "string" && matchLang(raw.lang) ? { lang: matchLang(raw.lang) ?? undefined } : {}),
   };
 }
 
-const ANSWER_LANGUAGE: Record<string, string> = {
-  "zh-CN": "Simplified Chinese",
-  "hi-IN": "Hindi",
-  "bn-BD": "Bangla",
-};
-
-async function preferredLang(): Promise<string> {
+/**
+ * The page language when the browser did not send one: the saved cookie, then the browser's
+ * Accept-Language, then English.
+ */
+async function preferredLang(): Promise<UiLang> {
   try {
-    const { getCookie } = await import("@tanstack/react-start/server");
-    return getCookie("folio_lang") ?? "";
+    const { getCookie, getRequestHeader } = await import("@tanstack/react-start/server");
+    return matchLang(getCookie(LANG_COOKIE)) ?? pickLang(parseAcceptLanguage(getRequestHeader("accept-language"))) ?? "en-US";
   } catch {
-    return "";
+    return "en-US";
   }
 }
 
 export const searchAll = createServerFn({ method: "POST" })
   .validator(readSearch)
   .handler(async ({ data }): Promise<SearchPayload> => {
-    const lang = asSearchLang(await preferredLang());
-    return runSearch(lang ? { ...data, lang } : data);
+    const lang = asSearchLang(data.lang ?? (await preferredLang()));
+    return runSearch({ ...data, lang: lang ?? undefined });
   });
 
 /**
@@ -78,12 +78,13 @@ export const answerWithAi = createServerFn({ method: "POST" })
       seen.add(clean.url);
       context.push(clean);
     }
-    const requested = asSearchLang(typeof raw.lang === "string" ? raw.lang : "");
+    const requested = matchLang(typeof raw.lang === "string" ? raw.lang : "");
     return { q, context, model: aiChoiceOf(raw.model), ...(requested ? { lang: requested } : {}) };
   })
   .handler(async ({ data }): Promise<AiAnswer> => {
-    const lang = data.lang ?? asSearchLang(await preferredLang());
-    return runAiAnswer(data.q, data.context, data.model, lang ? { answerLanguage: ANSWER_LANGUAGE[lang] } : {});
+    // The answer is always written in the page language, English included.
+    const lang = data.lang ?? (await preferredLang());
+    return runAiAnswer(data.q, data.context, data.model, { answerLanguage: languageName(lang) });
   });
 
 /** Which AI models can run with the keys on the server, for the model menu. No keys are returned. */
@@ -93,19 +94,20 @@ export const listAiProviders = createServerFn({ method: "POST" })
 
 export const suggestQueries = createServerFn({ method: "POST" })
   .validator((input: unknown) => {
-    if (typeof input !== "object" || input === null) return { q: "" };
+    if (typeof input !== "object" || input === null) return { q: "", lang: "" };
     const q = "q" in input && typeof input.q === "string" ? input.q.trim().slice(0, 80) : "";
-    return { q };
+    const lang = "lang" in input && typeof input.lang === "string" ? input.lang.slice(0, 16) : "";
+    return { q, lang };
   })
-  .handler(async ({ data }): Promise<Suggestion[]> => runSuggest(data.q));
+  .handler(async ({ data }): Promise<Suggestion[]> => runSuggest(data.q, asSearchLang(data.lang)));
 
 export const trendingTopics = createServerFn({ method: "POST" })
   .validator(() => ({}))
   .handler(async (): Promise<Trend[]> => runTrending());
 
-const PREVIEW_LANGS = new Set(["zh-CN", "hi-IN", "bn-BD"]);
+const PREVIEW_LANGS = new Set<string>(SEARCH_LANGS);
 
-/** Translate the open preview into Chinese, Hindi, or Bangla. English is not sent. */
+/** Translate the open preview into the page language. English is not sent. */
 export const translatePreview = createServerFn({ method: "POST" })
   .validator((input: unknown) => {
     if (typeof input !== "object" || input === null) throw new Error("Invalid translation");
