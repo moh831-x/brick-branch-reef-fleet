@@ -1,4 +1,4 @@
-import { GROK_PAGE, IMAGES_MAX_PAGE, IMAGES_PAGE, PAGE, WEB_PAGE } from "./search.shared";
+import { GROK_PAGE, IMAGES_MAX_PAGE, IMAGES_PAGE, isLatinQuery, PAGE, relevantCount, WEB_PAGE } from "./search.shared";
 import { LANGS, langInfo, matchLang, wikiOrigin as wikiOriginFor, type UiLang } from "./i18n";
 
 export type SourceId = "web" | "wiki" | "grok" | "images";
@@ -62,11 +62,17 @@ export type SearchPayload = {
   places: PlaceRef[];
   placesError?: string;
   near: string;
-  /** Set when the web and Wikipedia search used a translation of `query`. */
+  /** Set when the Wikipedia search used a translation of `query` into the page language. */
   searched?: string;
   lang?: SearchLang;
+  /** Set when the web search used other words than `query` (Bing's feed only answers Latin-script queries well). */
+  webSearched?: string;
   /** Set when Grokipedia (English only) was searched with an English translation of `query`. */
   grokSearched?: string;
+  /** Why the query could not be translated, when that failed (the typed words were used instead). */
+  translateError?: string;
+  /** Why Grokipedia titles and snippets could not be translated into the page language, when that failed. */
+  grokTranslateError?: string;
   /** The page language this search ran for. */
   pageLang?: UiLang;
   definitions: WordDefinition[];
@@ -148,10 +154,14 @@ export function asSearchLang(value: string | undefined): SearchLang | null {
   return lang && lang !== "en-US" ? lang : null;
 }
 
-function bingMarket(lang: SearchLang | null): string {
+/**
+ * Bing's public web feed only takes the interface language. Adding mkt or cc (for example
+ * mkt=bn-BD or mkt=hi-IN, which Bing does not support, or even mkt=de-DE) makes the feed return
+ * nothing or unrelated pages, so the market is never sent there.
+ */
+function bingLang(lang: SearchLang | null): string {
   if (!lang) return "";
-  const row = langInfo(lang);
-  return `&setlang=${encodeURIComponent(row.setlang)}&mkt=${encodeURIComponent(row.mkt)}`;
+  return `&setlang=${encodeURIComponent(langInfo(lang).setlang)}`;
 }
 
 function wikiOriginOf(lang: SearchLang | null): string {
@@ -350,7 +360,7 @@ function readBingTotal(html: string): number | undefined {
 async function searchWeb(query: string, offset: number, near: string, lang: SearchLang | null): Promise<SourceBlock> {
   const first = Math.max(1, offset + 1);
   const q = near ? `${query} ${near}` : query;
-  const market = bingMarket(lang);
+  const market = bingLang(lang);
   const rssUrl = `https://www.bing.com/search?q=${encodeURIComponent(q)}&format=rss&first=${first}&count=${WEB_PAGE}${market}`;
   const htmlUrl = `https://www.bing.com/search?q=${encodeURIComponent(q)}&count=${WEB_PAGE}${market}`;
   const [xml, html] = await Promise.all([
@@ -379,6 +389,35 @@ async function searchWeb(query: string, offset: number, near: string, lang: Sear
     if (results.length >= WEB_PAGE) break;
   }
   return { results, total: readBingTotal(html), done: results.length < WEB_PAGE };
+}
+
+/**
+ * Try each query in turn and keep the first whose results actually mention it. Bing's public feed
+ * returns nothing, or unrelated pages, for many non-Latin queries, so a page-language query falls
+ * back to the English translation and then to the words typed.
+ */
+async function searchWebBest(
+  candidates: string[],
+  offset: number,
+  near: string,
+  lang: SearchLang | null,
+): Promise<{ block: SourceBlock; used: string }> {
+  let best: { block: SourceBlock; used: string; score: number } | null = null;
+  let lastError: unknown = null;
+  for (const candidate of candidates) {
+    try {
+      const block = await searchWeb(candidate, offset, near, lang);
+      const score = relevantCount(block.results, candidate);
+      if (block.results.length > 0 && score >= Math.min(3, block.results.length)) return { block, used: candidate };
+      if (!best || score > best.score || (score === best.score && block.results.length > best.block.results.length)) {
+        best = { block, used: candidate, score };
+      }
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  if (best) return best;
+  throw lastError instanceof Error ? lastError : new Error("Unavailable");
 }
 
 type WikiSearchResponse = {
@@ -579,18 +618,19 @@ export function parseBingImages(html: string): SearchHit[] {
   return hits;
 }
 
-async function imageBatch(query: string, first: number, lang: SearchLang | null): Promise<SearchHit[]> {
+async function imageBatch(query: string, first: number): Promise<SearchHit[]> {
   const url =
     `https://www.bing.com/images/async?q=${encodeURIComponent(query)}` +
-    `&first=${first}&count=${BING_IMAGE_BATCH}&adlt=${IMAGE_SAFE_SEARCH}${bingMarket(lang)}`;
+    `&first=${first}&count=${BING_IMAGE_BATCH}&adlt=${IMAGE_SAFE_SEARCH}`;
   return parseBingImages(await getText(url, "text/html"));
 }
 
-async function searchImages(query: string, offset: number, lang: SearchLang | null): Promise<SourceBlock> {
+/** Bing's image results come back empty when setlang or mkt is sent, so neither is. */
+async function searchImages(query: string, offset: number): Promise<SourceBlock> {
   const cap = IMAGES_MAX_PAGE * IMAGES_PAGE;
   if (offset >= cap) return { results: [], done: true };
   const want = Math.min(cap, offset + IMAGES_PAGE + 1);
-  const key = `${lang ?? "en"}:${query.toLowerCase()}`;
+  const key = query.toLowerCase();
   const cached = imagePoolCache.get(key);
   const fresh = cached && Date.now() - cached.at < 10 * 60 * 1000 ? cached : null;
   const hits = fresh ? [...fresh.hits] : [];
@@ -601,7 +641,7 @@ async function searchImages(query: string, offset: number, lang: SearchLang | nu
   while (!exhausted && hits.length < want && batch <= Math.ceil(cap / BING_IMAGE_BATCH)) {
     let rows: SearchHit[];
     try {
-      rows = await imageBatch(query, batch * BING_IMAGE_BATCH + 1, lang);
+      rows = await imageBatch(query, batch * BING_IMAGE_BATCH + 1);
     } catch (error) {
       if (!hits.length) throw error;
       break;
@@ -902,6 +942,28 @@ function labelDive(value: string): string {
     .join(" ");
 }
 
+/** Grokipedia is English only: show its titles and snippets in the page language when a translator is set up. */
+async function localizeGrok(block: SourceBlock, lang: SearchLang): Promise<{ block: SourceBlock; error?: string }> {
+  if (!block.results.length) return { block };
+  const { translateList } = await import("./ai.server");
+  const strings = block.results.flatMap((hit) => [hit.title, hit.snippet]);
+  try {
+    const out = await translateList(strings, lang);
+    return {
+      block: {
+        ...block,
+        results: block.results.map((hit, index) => ({
+          ...hit,
+          title: out[index * 2] || hit.title,
+          snippet: out[index * 2 + 1] ?? hit.snippet,
+        })),
+      },
+    };
+  } catch (error) {
+    return { block, error: error instanceof Error ? error.message : "translation failed" };
+  }
+}
+
 export async function runSearch(input: SearchInput): Promise<SearchPayload> {
   const started = Date.now();
   const query = input.q.replace(/\s+/g, " ").trim();
@@ -910,29 +972,51 @@ export async function runSearch(input: SearchInput): Promise<SearchPayload> {
   }
   const lang = asSearchLang(input.lang);
   let searched = query;
-  let grokQuery = query;
+  let english = query;
+  let translateError: string | undefined;
   if (lang) {
-    // Web and Wikipedia search in the page language. Grokipedia only has English pages, so it
-    // gets an English rendering of the query. Either translation falls back to the words typed.
-    const { runTranslate } = await import("./ai.server");
+    // Wikipedia searches in the page language. Grokipedia only has English pages, and Bing's public
+    // feed answers English (Latin-script) queries reliably, so both also get an English rendering.
+    // Either translation falls back to the words typed, and the reason is kept for the page.
+    const { translateQuery } = await import("./ai.server");
     const translate = (target: UiLang) =>
-      runTranslate({ lang: target, title: query, text: query })
-        .then((row) => row.title.replace(/\s+/g, " ").trim() || query)
-        .catch(() => query);
-    [searched, grokQuery] = await Promise.all([translate(lang), input.grok ? translate("en-US") : Promise.resolve(query)]);
+      translateQuery(query, target).catch((error: unknown) => {
+        translateError ??= error instanceof Error ? error.message : "translation failed";
+        return query;
+      });
+    const needEnglish = input.grok || input.web || input.images;
+    [searched, english] = await Promise.all([
+      input.wiki ? translate(lang) : Promise.resolve(query),
+      needEnglish ? translate("en-US") : Promise.resolve(query),
+    ]);
   }
+  const grokQuery = english;
   const wikiOrigin = wikiOriginOf(lang);
+  const unique = (values: string[]) => [...new Set(values.map((value) => value.trim()).filter(Boolean))];
+  // Page-language words first when Bing can read them, then English, then the words typed.
+  const webCandidates = lang ? unique([isLatinQuery(searched) ? searched : "", english, query]) : [query];
+  const imageQuery = lang ? (isLatinQuery(query) ? query : english) : query;
 
-  const [web, wikiOutcome, grok, images, definitions, deepDive] = await Promise.all([
-    input.web ? searchWeb(searched, input.webOffset, input.near, lang).catch(failed) : Promise.resolve(emptyBlock()),
+  const [webOutcome, wikiOutcome, grokOutcome, images, definitions, deepDive] = await Promise.all([
+    input.web
+      ? searchWebBest(webCandidates, input.webOffset, input.near, lang).catch((error) => ({ block: failed(error), used: query }))
+      : Promise.resolve({ block: emptyBlock(), used: query }),
     input.wiki
       ? searchWiki(searched, input.wikiOffset, wikiOrigin).catch((error) => ({ block: failed(error), places: [] as PlaceRef[] }))
       : Promise.resolve({ block: emptyBlock(), places: [] as PlaceRef[] }),
-    input.grok ? searchGrok(grokQuery, input.grokOffset).catch(failed) : Promise.resolve(emptyBlock()),
-    input.images ? searchImages(searched, input.imagesOffset, lang).catch(failed) : Promise.resolve(emptyBlock()),
+    input.grok
+      ? searchGrok(grokQuery, input.grokOffset)
+          .catch(failed)
+          .then((block): Promise<{ block: SourceBlock; error?: string }> =>
+            lang ? localizeGrok(block, lang) : Promise.resolve({ block }),
+          )
+      : Promise.resolve({ block: emptyBlock() } as { block: SourceBlock; error?: string }),
+    input.images ? searchImages(imageQuery, input.imagesOffset).catch(failed) : Promise.resolve(emptyBlock()),
     defineQuery(input.card ? query : ""),
-    input.web && input.webOffset === 0 ? readDeepDive(searched, lang).catch(() => []) : Promise.resolve([]),
+    input.web && input.webOffset === 0 ? readDeepDive(isLatinQuery(searched) ? searched : english, lang).catch(() => []) : Promise.resolve([]),
   ]);
+  const web = webOutcome.block;
+  const { block: grok, error: grokTranslateError } = grokOutcome;
   const wiki = wikiOutcome.block;
 
   let card: LeadCard | null = null;
@@ -982,7 +1066,10 @@ export async function runSearch(input: SearchInput): Promise<SearchPayload> {
     placesError,
     near: input.near,
     ...(lang && searched !== query ? { searched, lang } : {}),
+    ...(lang && input.web && webOutcome.used !== query ? { webSearched: webOutcome.used } : {}),
     ...(lang && grokQuery !== query ? { grokSearched: grokQuery } : {}),
+    ...(translateError ? { translateError } : {}),
+    ...(grokTranslateError ? { grokTranslateError } : {}),
     pageLang: lang ?? "en-US",
     definitions,
     deepDive,

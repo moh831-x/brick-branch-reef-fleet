@@ -2,7 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { GROK_PAGE, IMAGES_PAGE, MAX_PAGE, PAGE, WEB_PAGE } from "./search.shared";
 import { AI_MAX_CONTEXT, aiChoiceOf, cleanContextItem, type AiAnswer, type AiContextItem, type AiModelStatus } from "./ai.shared";
 import { aiModelStatus, runAiAnswer, runTranslate } from "./ai.server";
-import { LANG_COOKIE, languageName, matchLang, pickLang, parseAcceptLanguage, type UiLang } from "./i18n";
+import { LANG_COOKIE, languageName, matchLang, pickLang, parseAcceptLanguage, PREVIEW_TRANSLATE_CHARS, type UiLang } from "./i18n";
 import { SEARCH_LANGS, asSearchLang, runPreview, runSearch, runSuggest, runTrending, type HitPreview, type SearchInput, type SearchPayload, type SourceId, type Suggestion, type Trend } from "./search.server";
 
 export type { HitPreview, ImageRef, LeadCard, PlaceRef, PreviewSection, SearchHit, SearchInput, SearchPayload, SourceBlock, SourceId, Suggestion, Trend, WordDefinition, WordSense } from "./search.server";
@@ -114,7 +114,7 @@ export const translatePreview = createServerFn({ method: "POST" })
     const raw = input as Record<string, unknown>;
     const lang = typeof raw.lang === "string" ? raw.lang : "";
     const title = typeof raw.title === "string" ? raw.title.replace(/\s+/g, " ").trim().slice(0, 180) : "";
-    const text = typeof raw.text === "string" ? raw.text.trim().slice(0, 6000) : "";
+    const text = typeof raw.text === "string" ? raw.text.trim().slice(0, PREVIEW_TRANSLATE_CHARS) : "";
     if (!PREVIEW_LANGS.has(lang) || !title || !text) throw new Error("Invalid translation");
     return { lang, title, text };
   })

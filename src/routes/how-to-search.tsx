@@ -87,10 +87,11 @@ function HowToSearchPage() {
           <span className="font-mono">?lang=</span>, for example <span className="font-mono">?lang=ar</span>.
         </p>
         <p>
-          The language also changes what Folio searches. When it is not English, Folio translates your words, searches
-          the web with Bing set to that language and region, and searches that language’s Wikipedia. A line under the
-          query shows the words that were searched. Grokipedia only has English pages, so it is searched with an English
-          translation, and the line says so. The AI answer is written in the site language, and Listen on the answer
+          The language also changes what Folio searches. When it is not English, Folio translates your words and
+          searches that language’s Wikipedia. Bing’s web results only work reliably for words in Latin script, so the web
+          is searched with your words when Bing can read them and otherwise with an English translation. Grokipedia only
+          has English pages, so it is searched with an English translation, and its titles and snippets are translated
+          into the site language. Lines under the query show the words each source was searched with. The AI answer is written in the site language, and Listen on the answer
           reads it with a voice for that language. A preview in another language is translated into the site language;
           a Wikipedia article from that language’s own Wikipedia is shown as it is. To change the language, go back to
           the home screen and pick another one there; your next search uses it.

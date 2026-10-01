@@ -78,3 +78,29 @@ export function readBotSearch(params: URLSearchParams): BotSearchQuery | { error
     imagesOffset: pageOffset(params.get("imagesPage"), IMAGES_PAGE),
   };
 }
+
+/** Words of a query worth matching against a result: Latin words of 3+ letters, or any non-Latin run. */
+function queryTokens(query: string): string[] {
+  return fold(query)
+    .split(/[\s,.;:!?()"'«»“”„\-–—/]+/)
+    .filter((word) => word.length >= 3 || /[^\u0020-\u024f]/.test(word));
+}
+
+function fold(value: string): string {
+  return value.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+}
+
+/** True when the text is written in Latin script (Bing's feed handles these queries). */
+export function isLatinQuery(value: string): boolean {
+  return !/[^\s\u0020-\u024f\u1e00-\u1eff\u2000-\u206f]/.test(value.normalize("NFKD").replace(/[\u0300-\u036f]/g, ""));
+}
+
+/** How many results mention at least one word of the query (in title, snippet, or address). */
+export function relevantCount(hits: Array<{ title: string; snippet: string; url: string }>, query: string): number {
+  const tokens = queryTokens(query);
+  if (!tokens.length) return hits.length;
+  return hits.filter((hit) => {
+    const haystack = fold(`${hit.title} ${hit.snippet} ${hit.url}`);
+    return tokens.some((token) => haystack.includes(token));
+  }).length;
+}

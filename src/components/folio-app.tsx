@@ -33,7 +33,7 @@ import {
 } from "@/lib/ai.shared";
 import { SiteFooter } from "@/components/site-footer";
 import { fill, sourceLabel, type UiCopy } from "@/lib/ui-copy";
-import { langDir, langInfo, type UiLang } from "@/lib/i18n";
+import { langDir, langInfo, PREVIEW_TRANSLATE_CHARS, type UiLang } from "@/lib/i18n";
 import { useLang } from "@/lib/lang-context";
 import { LanguagePicker } from "@/components/language-picker";
 import { shareNative, tap, useIsNativeApp } from "@/lib/native";
@@ -859,6 +859,17 @@ function DeepDive({
   );
 }
 
+function TranslateNote({ label, reason }: { label: string; reason: string }) {
+  return (
+    <p className="mt-1 text-sm text-muted" role="status">
+      {label}{" "}
+      <span className="text-xs" dir="ltr" lang="en">
+        ({reason})
+      </span>
+    </p>
+  );
+}
+
 function SearchedAs({ label, text }: { label: string; text: string }) {
   return (
     <p className="mt-1 text-sm text-muted">
@@ -928,8 +939,10 @@ function Results({
       <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="font-display text-4xl text-ink sm:text-5xl">{query}</h1>
-          {data.searched ? <SearchedAs label={copy.searchedAs} text={data.searched} /> : null}
+          {data.webSearched && sources.web ? <SearchedAs label={copy.webSearchedAs} text={data.webSearched} /> : null}
+          {data.searched && sources.wiki ? <SearchedAs label={copy.searchedAs} text={data.searched} /> : null}
           {data.grokSearched && sources.grok ? <SearchedAs label={copy.grokSearchedAs} text={data.grokSearched} /> : null}
+          {data.translateError ? <TranslateNote label={copy.queryTranslateFailed} reason={data.translateError} /> : null}
         </div>
         <div className="flex items-center gap-2">
           <p className="text-sm text-muted tabular-nums" aria-live="polite">
@@ -972,6 +985,9 @@ function Results({
                     {count ? ` — ${count}` : ""}
                   </p>
                 </div>
+                {block.key === "grok" && data?.grokTranslateError ? (
+                  <TranslateNote label={copy.listTranslateFailed} reason={data.grokTranslateError} />
+                ) : null}
                 {block.error ? (
                   <p className="text-sm text-muted">{fill(copy.noResponse, { source: sourceLabel(copy, block.key) })}</p>
                 ) : null}
@@ -1844,6 +1860,23 @@ function ReadAloud({
   );
 }
 
+/**
+ * Pack the lead and as many whole sections as fit in `limit` characters for translation. `sent` is
+ * how many sections went in; the rest are shown untranslated after the translated ones.
+ */
+function packForTranslation(lead: string, sections: PreviewSection[], limit: number): { body: string; sent: number } {
+  const head = lead.trim().slice(0, limit);
+  let sent = 0;
+  let body = head;
+  for (const section of sections) {
+    const next = packPreview(body, [section]);
+    if (next.length > limit) break;
+    body = next;
+    sent += 1;
+  }
+  return { body, sent };
+}
+
 function packPreview(lead: string, sections: PreviewSection[]): string {
   const chunks = [lead.trim()];
   for (const section of sections) {
@@ -1906,9 +1939,10 @@ function ResultPeek({
   const titleId = useId();
   const [preview, setPreview] = useState<HitPreview | null>(null);
   const [previewReady, setPreviewReady] = useState(hit.source === "web" || hit.source === "images");
-  const [translation, setTranslation] = useState<{ title: string; text: string } | null>(null);
+  const [translation, setTranslation] = useState<{ title: string; text: string; partial?: boolean } | null>(null);
   const [translating, setTranslating] = useState(false);
-  const [translateError, setTranslateError] = useState(false);
+  /** Why the translation failed (from the server), or null. */
+  const [translateError, setTranslateError] = useState<string | null>(null);
   const [activeSection, setActiveSection] = useState("s-0");
 
   useEffect(() => {
@@ -1965,7 +1999,7 @@ function ResultPeek({
   const rtl = langDir(lang) === "rtl";
   const extract = preview?.extract || hit.snippet;
   const sourceSections = preview?.sections ?? [];
-  const sourceBody = packPreview(extract, sourceSections);
+  const { body: sourceBody, sent: sentSections } = packForTranslation(extract, sourceSections, PREVIEW_TRANSLATE_CHARS);
   const sourceTitle = preview?.title || hit.title;
   // A Wikipedia article from the page language's own edition is already in that language.
   const native = lang === "en-US" || (hit.source === "wiki" && wikiHostOf(hit.url) === `${langInfo(lang).wiki}.wikipedia.org`);
@@ -1973,12 +2007,14 @@ function ResultPeek({
   const unpacked = translated ? unpackPreview(translated.text) : null;
   const shownTitle = translated?.title || sourceTitle;
   const shownLead = unpacked ? unpacked.lead : extract;
-  const shownSections = unpacked?.sections.length ? unpacked.sections : translated ? [] : sourceSections;
+  // Sections past the translation limit follow the translated ones in their original language.
+  const restSections = translated ? sourceSections.slice(sentSections).map((section, index) => ({ ...section, id: `r-${index}` })) : [];
+  const shownSections = translated ? [...(unpacked?.sections ?? []), ...restSections] : sourceSections;
   const shownText = [shownLead, ...shownSections.map((section) => `${section.title}. ${section.text}`)].filter(Boolean).join("\n\n");
   const leadParagraphs = shownLead.split(/\n\n+/).map((part) => part.trim()).filter(Boolean);
   const pageUrl = preview?.url || hit.url;
   const videoId = youtubeId(pageUrl);
-  const speakReady = native || translateError || Boolean(translated && !translating);
+  const speakReady = native || Boolean(translateError) || Boolean(translated && !translating);
 
   useEffect(() => {
     setActiveSection(shownSections[0]?.id ?? "s-0");
@@ -1987,22 +2023,22 @@ function ResultPeek({
   useEffect(() => {
     // A new language drops the old translation so its text is never shown under the new buttons.
     setTranslation(null);
-    setTranslateError(false);
+    setTranslateError(null);
   }, [lang]);
 
   useEffect(() => {
     if (native || !previewReady) return;
     let cancelled = false;
     setTranslating(true);
-    setTranslateError(false);
+    setTranslateError(null);
     translatePreview({ data: { lang, title: sourceTitle, text: sourceBody } })
       .then((row) => {
         if (!cancelled) setTranslation(row);
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (!cancelled) {
           setTranslation(null);
-          setTranslateError(true);
+          setTranslateError(error instanceof Error && error.message ? error.message.slice(0, 200) : "unknown error");
         }
       })
       .finally(() => {
@@ -2095,7 +2131,15 @@ function ResultPeek({
             text={[shownTitle, shownText].filter(Boolean).join(". ")}
           />
           {translating && !native ? <p className="mt-2 text-sm text-muted">{copy.translating}</p> : null}
-          {translateError && !native ? <p className="mt-2 text-sm text-muted">{copy.translateFailed}</p> : null}
+          {translateError && !native ? (
+            <p className="mt-2 text-sm text-muted" role="status">
+              {copy.translateFailed}{" "}
+              <span className="text-xs" dir="ltr" lang="en">
+                ({translateError})
+              </span>
+            </p>
+          ) : null}
+          {translated?.partial && !native ? <p className="mt-2 text-sm text-muted">{copy.translatePartial}</p> : null}
           {shownSections.length > 0 ? (
             <div className="mt-4 sm:grid sm:grid-cols-[9.5rem_minmax(0,1fr)] sm:gap-4">
               <nav aria-label={copy.contents} className="mb-4 sm:sticky sm:top-0 sm:mb-0 sm:max-h-[70vh] sm:overflow-y-auto">

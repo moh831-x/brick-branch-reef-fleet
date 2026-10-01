@@ -118,9 +118,10 @@ function PrivacyPage() {
           address, and results come from the same services. The website asks an AI provider for a short answer on
           every search. The public search endpoint sends the query to an AI provider only when the address asks for
           an AI answer (<span className="font-mono">ai=1</span>). If the site language is not English, Folio asks an
-          AI provider to translate the query, sends that translation to Bing (with that language and region) and to
-          that language’s Wikipedia, and sends an English translation to Grokipedia. The AI answer is written in the
-          site language. Until you pick a language, Folio reads your browser’s preferred languages (the
+          AI provider to translate the query into that language (sent to that language’s Wikipedia) and into English
+          (sent to Grokipedia, and to Bing with the site language set when the query is not in Latin script). Grokipedia
+          titles and snippets, and the text of a preview you open, are also sent to an AI provider to be translated into
+          the site language. The AI answer is written in the site language. Until you pick a language, Folio reads your browser’s preferred languages (the
           Accept-Language header it sends with every request) to choose one.
         </p>
 

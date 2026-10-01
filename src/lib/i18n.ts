@@ -89,3 +89,6 @@ export function wikiOrigin(code: UiLang): string {
 export function languageName(code: UiLang): string {
   return langInfo(code).english;
 }
+
+/** Most article text a preview sends for translation; later sections stay in the original language. */
+export const PREVIEW_TRANSLATE_CHARS = 12000;
