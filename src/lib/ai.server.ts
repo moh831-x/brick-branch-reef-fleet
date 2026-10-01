@@ -135,6 +135,37 @@ export function availableAiProviders(env: Env = process.env): AiProviderId[] {
   return AI_PROVIDERS.map((provider) => provider.id).filter((id) => readProviderConfig(id, env) !== null);
 }
 
+/** How long a model the AI Gateway refused for the account's plan stays marked "needs a paid plan". */
+const PLAN_BLOCK_MS = 6 * 60 * 60_000;
+/** Gateway model id -> until when it is treated as refused (per server instance). */
+const gatewayPlanBlocks = new Map<string, number>();
+
+/**
+ * Whether a failed AI Gateway reply means "this model is not on your plan / out of paid credits",
+ * as opposed to a bad key, a bad request, or an outage. Exported for tests.
+ */
+export function isPlanRefusal(status: number, body: string): boolean {
+  if (status === 402) return true;
+  if (status !== 400 && status !== 403) return false;
+  return /\b(paid|plan|credits?|billing|upgrade|free (tier|plan|credits))\b/i.test(body);
+}
+
+export function markGatewayPlanBlocked(gatewayModel: string, now = Date.now()) {
+  gatewayPlanBlocks.set(gatewayModel, now + PLAN_BLOCK_MS);
+}
+
+/** Menu model ids the gateway has refused for this plan recently. */
+export function planBlockedModels(now = Date.now()): Set<string> {
+  const out = new Set<string>();
+  for (const spec of AI_MODELS) {
+    const until = spec.gateway ? gatewayPlanBlocks.get(spec.gateway) : undefined;
+    if (until === undefined) continue;
+    if (until > now) out.add(spec.id);
+    else gatewayPlanBlocks.delete(spec.gateway!);
+  }
+  return out;
+}
+
 /** What the selector needs: which providers are set up, and their model names. Never the keys. */
 export function aiProviderStatus(env: Env = process.env): AiProviderStatus[] {
   return AI_PROVIDERS.map((provider) => {
@@ -155,8 +186,9 @@ export function aiKeyFlags(env: Env = process.env): AiKeyFlags {
 /** Which listed models can run with the keys on this server. Never includes the keys. */
 export function aiModelStatus(env: Env = process.env): AiModelStatus[] {
   const keys = aiKeyFlags(env);
+  const blocked = planBlockedModels();
   return AI_MODELS.map((spec) => {
-    const note = modelNote(spec, keys);
+    const note = modelNote(spec, keys, blocked);
     return { id: spec.id, label: spec.label, provider: spec.provider, available: !note, ...(note ? { note } : {}) };
   });
 }
@@ -164,7 +196,7 @@ export function aiModelStatus(env: Env = process.env): AiModelStatus[] {
 /** Config for one menu model, using the provider's own key when it has one and the gateway otherwise. */
 export function configForModel(modelId: string, env: Env = process.env): ProviderConfig | null {
   const spec = AI_MODELS.find((model) => model.id === modelId);
-  if (!spec || !modelReady(spec, aiKeyFlags(env))) return null;
+  if (!spec || !modelReady(spec, aiKeyFlags(env), planBlockedModels())) return null;
   if (spec.provider === "gemini") {
     const apiKey = env.AI_GATEWAY_API_KEY?.trim();
     if (!apiKey || !spec.gateway) return null;
@@ -174,7 +206,7 @@ export function configForModel(modelId: string, env: Env = process.env): Provide
   if (!base) return null;
   const model = base.gateway ? spec.gateway : spec.direct;
   if (!model) return null;
-  return { ...base, model, effort: undefined };
+  return { ...base, model, effort: spec.effort };
 }
 
 type Request = { url: string; init: RequestInit };
@@ -221,7 +253,8 @@ export function buildProviderRequest(config: ProviderConfig, query: string, cont
         ],
         // OpenAI reasoning models reject temperature and max_tokens; they use max_completion_tokens.
         ...(openai ? { max_completion_tokens: MAX_OUTPUT_TOKENS } : { max_tokens: MAX_OUTPUT_TOKENS, temperature: 0.2 }),
-        ...(config.effort ? { reasoning_effort: config.effort } : {}),
+        // The AI Gateway takes a unified `reasoning` object; OpenAI and xAI take `reasoning_effort`.
+        ...(config.effort ? (config.gateway ? { reasoning: { effort: config.effort } } : { reasoning_effort: config.effort }) : {}),
         stream: false,
       }),
     },
@@ -538,7 +571,16 @@ async function askProvider(
   const request = buildProviderRequest(config, query, context, language);
   const response = await fetcher(request.url, { ...request.init, signal: AbortSignal.timeout(AI_TIMEOUT_MS) });
   // Log the status only: never the key, and never the reader's query.
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  if (!response.ok) {
+    if (config.gateway) {
+      const body = await response.text().catch(() => "");
+      if (isPlanRefusal(response.status, body.slice(0, 2000))) {
+        markGatewayPlanBlocked(config.model);
+        throw new Error(`HTTP ${response.status} (plan)`);
+      }
+    }
+    throw new Error(`HTTP ${response.status}`);
+  }
   const { raw, model } = readProviderResponse(config, await response.json());
   const parsed = parseAiAnswer(raw, context);
   if (!parsed.text) throw new Error("empty answer");

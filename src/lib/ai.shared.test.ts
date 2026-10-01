@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  AI_MODELS,
   AI_MAX_CONTEXT,
   aiChoiceOf,
   aiProviderOf,
@@ -80,14 +81,15 @@ describe("AI providers", () => {
   it("keeps a model the reader can run, and maps an old provider id to that provider's default", () => {
     const keys: AiKeyFlags = { grok: true, openai: false, claude: false, gateway: true };
     assert.equal(modelReady({ id: "grok-4.7", label: "Grok 4.7", provider: "grok", direct: "grok-4.7" }, keys), true);
-    assert.equal(
-      modelReady(
-        { id: "claude-sonnet-5.5", label: "Claude", provider: "claude", direct: "claude-sonnet-5-5", gateway: "anthropic/claude-sonnet-5.5", paidGateway: true },
-        keys,
-      ),
-      false,
-    );
-    assert.equal(modelNote({ id: "claude-sonnet-5.5", label: "Claude", provider: "claude", gateway: "x", paidGateway: true }, keys), "needs a paid plan");
+    const sonnet = { id: "claude-sonnet-5.5", label: "Claude", provider: "claude", direct: "claude-sonnet-5-5", gateway: "anthropic/claude-sonnet-5.5" } as const;
+    // Through the gateway it can be picked until the gateway refuses it for the plan.
+    assert.equal(modelReady(sonnet, keys), true);
+    assert.equal(modelNote(sonnet, keys), undefined);
+    assert.equal(modelReady(sonnet, keys, new Set(["claude-sonnet-5.5"])), false);
+    assert.equal(modelNote(sonnet, keys, new Set(["claude-sonnet-5.5"])), "needs a paid plan");
+    // With Anthropic's own key the plan does not matter.
+    assert.equal(modelReady(sonnet, { ...keys, claude: true }, new Set(["claude-sonnet-5.5"])), true);
+    assert.equal(modelNote(sonnet, { grok: true, openai: false, claude: false, gateway: false }), "not set up");
     assert.equal(selectedAiModel("grok-4.7", ["grok-4.3", "grok-4.7", "gpt-4.1-mini"]), "grok-4.7");
     assert.equal(selectedAiModel("openai", ["grok-4.3", "gpt-4.1-mini", "gpt-4o-mini"]), "gpt-4.1-mini");
     assert.equal(selectedAiModel(undefined, ["gpt-4o-mini", "grok-4.3"]), "grok-4.3");
@@ -148,3 +150,23 @@ describe("parseAiAnswer", () => {
     assert.deepEqual(parsed.parts, [{ text: "The results don't say." }]);
   });
 });
+
+describe("AI model menu", () => {
+  it("lists GPT-6 Astra and the Claude models with AI Gateway ids", () => {
+    const byId = new Map(AI_MODELS.map((model) => [model.id, model]));
+    assert.deepEqual(
+      { ...byId.get("gpt-6-astra") },
+      { id: "gpt-6-astra", label: "GPT-6 Astra", provider: "openai", direct: "gpt-6-astra", gateway: "openai/gpt-6-astra", effort: "low" },
+    );
+    assert.equal(byId.get("claude-sonnet-5.5")?.gateway, "anthropic/claude-sonnet-5.5");
+    assert.equal(byId.get("claude-haiku-4.5")?.gateway, "anthropic/claude-haiku-4.5");
+    assert.equal(byId.get("claude-haiku-4.5")?.direct, "claude-haiku-4-5");
+    assert.equal(aiChoiceOf("GPT-6-Astra"), "gpt-6-astra");
+    // Order: each company's strongest model first.
+    const ids = AI_MODELS.map((model) => model.id);
+    assert.ok(ids.indexOf("gpt-6-astra") < ids.indexOf("gpt-4.1-mini"));
+    assert.ok(ids.indexOf("claude-sonnet-5.5") < ids.indexOf("claude-haiku-4.5"));
+    assert.equal(new Set(ids).size, ids.length);
+  });
+});
+

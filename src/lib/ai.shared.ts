@@ -57,14 +57,19 @@ export type AiModelSpec = {
   provider: AnswerProviderId;
   direct?: string;
   gateway?: string;
-  /** Free AI Gateway plans reject this model. A provider's own key can still use `direct`. */
-  paidGateway?: boolean;
+  /**
+   * Reasoning effort to ask for, for models that always reason (GPT-6 Astra). Keeps answers quick and
+   * inside the output budget. Sent as `reasoning.effort` to the AI Gateway and `reasoning_effort` to OpenAI.
+   */
+  effort?: "low" | "medium" | "high";
 };
 
 export const AI_MODELS: readonly AiModelSpec[] = [
   { id: "grok-4.7", label: "Grok 4.7", provider: "grok", direct: "grok-4.7" },
   { id: "grok-4.6", label: "Grok 4.6", provider: "grok", direct: "grok-4.6" },
   { id: "grok-4.3", label: "Grok 4.3", provider: "grok", direct: "grok-4.3" },
+  // Model ids checked against https://ai-gateway.vercel.sh/v1/models (Oct 1, 2026).
+  { id: "gpt-6-astra", label: "GPT-6 Astra", provider: "openai", direct: "gpt-6-astra", gateway: "openai/gpt-6-astra", effort: "low" },
   { id: "gpt-4.1-mini", label: "GPT-4.1 mini", provider: "openai", direct: "gpt-4.1-mini", gateway: "openai/gpt-4.1-mini" },
   { id: "gpt-4o-mini", label: "GPT-4o mini", provider: "openai", direct: "gpt-4o-mini", gateway: "openai/gpt-4o-mini" },
   { id: "gemini-2.5-flash-lite", label: "Gemini 2.5 Flash Lite", provider: "gemini", gateway: "google/gemini-2.5-flash-lite" },
@@ -74,7 +79,13 @@ export const AI_MODELS: readonly AiModelSpec[] = [
     provider: "claude",
     direct: "claude-sonnet-5-5",
     gateway: "anthropic/claude-sonnet-5.5",
-    paidGateway: true,
+  },
+  {
+    id: "claude-haiku-4.5",
+    label: "Claude Haiku 4.5",
+    provider: "claude",
+    direct: "claude-haiku-4-5",
+    gateway: "anthropic/claude-haiku-4.5",
   },
 ];
 
@@ -97,17 +108,26 @@ export function aiChoiceOf(value: unknown): string | undefined {
   return aiModelOf(value) ?? aiProviderOf(value);
 }
 
-export function modelReady(spec: AiModelSpec, keys: AiKeyFlags): boolean {
-  if (spec.provider === "gemini") return keys.gateway && Boolean(spec.gateway);
-  if (spec.provider === "grok") return keys.grok && Boolean(spec.direct);
-  const own = spec.provider === "openai" ? keys.openai : keys.claude;
-  if (own && spec.direct) return true;
-  return !own && keys.gateway && Boolean(spec.gateway) && !spec.paidGateway;
+/** True when this model would be called through the AI Gateway (no key of its provider's own). */
+function viaGateway(spec: AiModelSpec, keys: AiKeyFlags): boolean {
+  if (spec.provider === "gemini") return true;
+  if (spec.provider === "grok") return false;
+  return !(spec.provider === "openai" ? keys.openai : keys.claude);
 }
 
-export function modelNote(spec: AiModelSpec, keys: AiKeyFlags): string | undefined {
-  if (modelReady(spec, keys)) return undefined;
-  if (spec.paidGateway && keys.gateway && !(spec.provider === "claude" ? keys.claude : false)) return "needs a paid plan";
+/**
+ * `planBlocked` holds the ids of models the AI Gateway has refused for this account's plan
+ * (the server learns that from a real refusal; see ai.server.ts). They stay listed but cannot be picked.
+ */
+export function modelReady(spec: AiModelSpec, keys: AiKeyFlags, planBlocked: ReadonlySet<string> = new Set()): boolean {
+  if (spec.provider === "grok") return keys.grok && Boolean(spec.direct);
+  if (!viaGateway(spec, keys)) return Boolean(spec.direct);
+  return keys.gateway && Boolean(spec.gateway) && !planBlocked.has(spec.id);
+}
+
+export function modelNote(spec: AiModelSpec, keys: AiKeyFlags, planBlocked: ReadonlySet<string> = new Set()): string | undefined {
+  if (modelReady(spec, keys, planBlocked)) return undefined;
+  if (keys.gateway && viaGateway(spec, keys) && planBlocked.has(spec.id)) return "needs a paid plan";
   return "not set up";
 }
 

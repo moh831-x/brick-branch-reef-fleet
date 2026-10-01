@@ -5,7 +5,10 @@ import {
   aiProviderStatus,
   availableAiProviders,
   buildProviderRequest,
+  aiModelStatus,
   configForModel,
+  isPlanRefusal,
+  planBlockedModels,
   readProviderConfig,
   readProviderResponse,
   runAiAnswer,
@@ -89,7 +92,8 @@ describe("provider config", () => {
     // A provider's own key still talks to that provider, not the gateway.
     assert.equal(readProviderConfig("claude", { ...env, ANTHROPIC_API_KEY: "a-key" })?.baseUrl, "https://api.anthropic.com/v1");
     assert.ok(!JSON.stringify(aiProviderStatus(env)).includes("gateway-key"));
-    assert.equal(configForModel("claude-sonnet-5.5", env), null);
+    // Claude Sonnet runs through the gateway too, until the gateway refuses it for the plan (tested below).
+    assert.equal(configForModel("claude-sonnet-5.5", env)?.model, "anthropic/claude-sonnet-5.5");
     assert.equal(configForModel("gpt-4o-mini", env)?.model, "openai/gpt-4o-mini");
     assert.equal(configForModel("gemini-2.5-flash-lite", env)?.model, "google/gemini-2.5-flash-lite");
     assert.equal(configForModel("grok-4.7", { XAI_API_KEY: "x-key" })?.model, "grok-4.7");
@@ -199,3 +203,87 @@ describe("runAiAnswer", () => {
     assert.equal(calls.length, 2);
   });
 });
+
+describe("GPT-6 Astra and Claude through the AI Gateway", () => {
+  const GATEWAY = { XAI_API_KEY: "x", AI_GATEWAY_API_KEY: "g-key" };
+
+  it("sends the exact gateway model ids, low reasoning effort for Astra, and no temperature", () => {
+    const astra = configForModel("gpt-6-astra", GATEWAY);
+    assert.ok(astra);
+    const request = buildProviderRequest(astra, "dogs", context);
+    assert.equal(request.url, "https://ai-gateway.vercel.sh/v1/chat/completions");
+    assert.equal(headers(request.init).Authorization, "Bearer g-key");
+    const sent = body(request.init);
+    assert.equal(sent.model, "openai/gpt-6-astra");
+    assert.deepEqual(sent.reasoning, { effort: "low" });
+    assert.equal(sent.reasoning_effort, undefined);
+    assert.equal(sent.temperature, undefined);
+    assert.equal(sent.max_completion_tokens, 1200);
+    assert.equal(sent.stream, false);
+
+    for (const [id, model] of [
+      ["claude-sonnet-5.5", "anthropic/claude-sonnet-5.5"],
+      ["claude-haiku-4.5", "anthropic/claude-haiku-4.5"],
+    ] as const) {
+      const config = configForModel(id, GATEWAY);
+      assert.ok(config, id);
+      const claude = body(buildProviderRequest(config, "dogs", context).init);
+      assert.equal(claude.model, model);
+      assert.equal(claude.reasoning, undefined);
+    }
+  });
+
+  it("uses OpenAI's and Anthropic's own ids with their own keys", () => {
+    const astra = configForModel("gpt-6-astra", { OPENAI_API_KEY: "o" });
+    assert.ok(astra);
+    const sent = body(buildProviderRequest(astra, "dogs", context).init);
+    assert.equal(sent.model, "gpt-6-astra");
+    assert.equal(sent.reasoning_effort, "low");
+    const haiku = configForModel("claude-haiku-4.5", { ANTHROPIC_API_KEY: "a" });
+    assert.ok(haiku);
+    const request = buildProviderRequest(haiku, "dogs", context);
+    assert.match(request.url, /api\.anthropic\.com\/v1\/messages$/);
+    assert.equal(body(request.init).model, "claude-haiku-4-5");
+  });
+
+  it("tells plan refusals apart from other failures", () => {
+    assert.equal(isPlanRefusal(402, ""), true);
+    assert.equal(isPlanRefusal(403, '{"error":{"message":"This model requires a paid plan. Purchase credits to continue."}}'), true);
+    assert.equal(isPlanRefusal(403, "forbidden"), false);
+    assert.equal(isPlanRefusal(401, "invalid api key"), false);
+    assert.equal(isPlanRefusal(500, "paid plan"), false);
+  });
+
+  it("answers with the picked model, and after a plan refusal falls back and marks it 'needs a paid plan'", async () => {
+    const calls: string[] = [];
+    const fetcher = (async (_url: string | URL, init?: RequestInit) => {
+      const model = String(body(init ?? {}).model);
+      calls.push(model);
+      if (model === "anthropic/claude-sonnet-5.5") {
+        return Response.json({ error: { message: "Free credits cannot be used with this model. Upgrade to a paid plan." } }, { status: 403 });
+      }
+      return Response.json({ model, choices: [{ message: { content: `${model} says hi [1].` } }] });
+    }) as typeof fetch;
+
+    const astra = await runAiAnswer("dogs", context, "gpt-6-astra", { env: GATEWAY, fetcher });
+    assert.ok(astra.status === "ok");
+    assert.equal(astra.model, "openai/gpt-6-astra");
+    assert.equal(astra.provider, "openai");
+
+    const haiku = await runAiAnswer("dogs", context, "claude-haiku-4.5", { env: GATEWAY, fetcher });
+    assert.ok(haiku.status === "ok" && haiku.model === "anthropic/claude-haiku-4.5");
+
+    assert.ok(!planBlockedModels().has("claude-sonnet-5.5"));
+    const sonnet = await runAiAnswer("dogs", context, "claude-sonnet-5.5", { env: GATEWAY, fetcher });
+    assert.ok(sonnet.status === "ok");
+    assert.equal(sonnet.provider, "claude", "falls back to the gateway's Claude default");
+    assert.equal(sonnet.model, "anthropic/claude-3-haiku");
+    assert.ok(planBlockedModels().has("claude-sonnet-5.5"));
+    const row = aiModelStatus(GATEWAY).find((model) => model.id === "claude-sonnet-5.5");
+    assert.deepEqual({ available: row?.available, note: row?.note }, { available: false, note: "needs a paid plan" });
+    assert.equal(configForModel("claude-sonnet-5.5", GATEWAY), null);
+    // Marks expire.
+    assert.ok(!planBlockedModels(Date.now() + 7 * 60 * 60_000).has("claude-sonnet-5.5"));
+  });
+});
+
