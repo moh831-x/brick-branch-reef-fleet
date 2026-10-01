@@ -93,7 +93,6 @@ export type UiCopy = {
   translating: string;
   translateFailed: string;
   noVoice: string;
-  readingLanguage: string;
   controls: string;
   speed: string;
   voices: string;
@@ -196,7 +195,6 @@ const en: UiCopy = {
   translating: "Translating…",
   translateFailed: "Translation didn’t load. The original text is still shown.",
   noVoice: "This browser has no voice installed for this language, so the reading may use another voice.",
-  readingLanguage: "Reading language",
   controls: "Reading controls",
   speed: "Reading speed",
   voices: "Voices",
@@ -298,7 +296,6 @@ export const UI: Record<UiLang, UiCopy> = {
     translating: "অনুবাদ হচ্ছে…",
     translateFailed: "অনুবাদ লোড হয়নি। আসল লেখা এখনও দেখা যাচ্ছে।",
     noVoice: "এই ব্রাউজারে এই ভাষার কোনো কণ্ঠ ইনস্টল করা নেই, তাই পড়ার জন্য অন্য কণ্ঠ ব্যবহার হতে পারে।",
-    readingLanguage: "পড়ার ভাষা",
     controls: "পড়ার নিয়ন্ত্রণ",
     speed: "পড়ার গতি",
     voices: "কণ্ঠ",
@@ -397,7 +394,6 @@ export const UI: Record<UiLang, UiCopy> = {
     translating: "अनुवाद हो रहा है…",
     translateFailed: "अनुवाद लोड नहीं हुआ। मूल पाठ अभी भी दिख रहा है।",
     noVoice: "इस ब्राउज़र में इस भाषा की कोई आवाज़ इंस्टॉल नहीं है, इसलिए पढ़ने के लिए कोई और आवाज़ इस्तेमाल हो सकती है।",
-    readingLanguage: "पढ़ने की भाषा",
     controls: "पढ़ने के नियंत्रण",
     speed: "पढ़ने की गति",
     voices: "आवाज़ें",
@@ -496,7 +492,6 @@ export const UI: Record<UiLang, UiCopy> = {
     translating: "جارٍ الترجمة…",
     translateFailed: "لم يتم تحميل الترجمة. لا يزال النص الأصلي معروضًا.",
     noVoice: "لا يحتوي هذا المتصفح على صوت مثبّت لهذه اللغة، لذا قد تستخدم القراءة صوتًا آخر.",
-    readingLanguage: "لغة القراءة",
     controls: "عناصر التحكم في القراءة",
     speed: "سرعة القراءة",
     voices: "الأصوات",
@@ -595,7 +590,6 @@ export const UI: Record<UiLang, UiCopy> = {
     translating: "Traduciendo…",
     translateFailed: "La traducción no se cargó. Se sigue mostrando el texto original.",
     noVoice: "Este navegador no tiene ninguna voz instalada para este idioma, así que la lectura puede usar otra voz.",
-    readingLanguage: "Idioma de lectura",
     controls: "Controles de lectura",
     speed: "Velocidad de lectura",
     voices: "Voces",
@@ -694,7 +688,6 @@ export const UI: Record<UiLang, UiCopy> = {
     translating: "Traduction en cours…",
     translateFailed: "La traduction ne s’est pas chargée. Le texte original reste affiché.",
     noVoice: "Ce navigateur n’a aucune voix installée pour cette langue ; la lecture peut utiliser une autre voix.",
-    readingLanguage: "Langue de lecture",
     controls: "Commandes de lecture",
     speed: "Vitesse de lecture",
     voices: "Voix",
@@ -793,7 +786,6 @@ export const UI: Record<UiLang, UiCopy> = {
     translating: "正在翻译…",
     translateFailed: "翻译没有加载。仍显示原文。",
     noVoice: "此浏览器未安装这种语言的语音，朗读可能会使用其他语音。",
-    readingLanguage: "朗读语言",
     controls: "朗读控制",
     speed: "朗读速度",
     voices: "语音",
@@ -892,7 +884,6 @@ export const UI: Record<UiLang, UiCopy> = {
     translating: "翻訳しています…",
     translateFailed: "翻訳を読み込めませんでした。元のテキストを表示しています。",
     noVoice: "このブラウザにはこの言語の音声がインストールされていないため、別の音声で読み上げられる場合があります。",
-    readingLanguage: "読み上げ言語",
     controls: "読み上げの操作",
     speed: "読み上げ速度",
     voices: "音声",
@@ -991,7 +982,6 @@ export const UI: Record<UiLang, UiCopy> = {
     translating: "Traduzindo…",
     translateFailed: "A tradução não carregou. O texto original continua sendo exibido.",
     noVoice: "Este navegador não tem nenhuma voz instalada para este idioma, então a leitura pode usar outra voz.",
-    readingLanguage: "Idioma da leitura",
     controls: "Controles de leitura",
     speed: "Velocidade da leitura",
     voices: "Vozes",
@@ -1090,7 +1080,6 @@ export const UI: Record<UiLang, UiCopy> = {
     translating: "Wird übersetzt…",
     translateFailed: "Die Übersetzung wurde nicht geladen. Der Originaltext wird weiter angezeigt.",
     noVoice: "In diesem Browser ist keine Stimme für diese Sprache installiert, daher kann eine andere Stimme vorlesen.",
-    readingLanguage: "Vorlesesprache",
     controls: "Vorlese-Steuerung",
     speed: "Vorlesegeschwindigkeit",
     voices: "Stimmen",

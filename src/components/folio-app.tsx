@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
-import { Link, useNavigate, useRouter, useRouterState } from "@tanstack/react-router";
+import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import { ArrowUp, ArrowUpRight, BookOpen, ChevronDown, ChevronLeft, ChevronRight, Clock, Compass, Globe, ImageIcon, Pause, Play, RotateCw, Search, Share, Sparkles, Square, TrendingUp, Volume2, X } from "lucide-react";
 import type { FolioSearch } from "@/routes/index";
 import {
@@ -179,16 +179,8 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(-1);
   const [chrome, setChrome] = useState<"full" | "hidden" | "search">("full");
-  const router = useRouter();
-  const { lang: uiLang, copy, setLang } = useLang();
-  /** The preview and the read-aloud player switch the language without searching again. */
-  function chooseUiLang(next: UiLang) {
-    setLang(next);
-  }
-  /** The page-level language menus also run the current search again in the new language. */
-  function onPageLang() {
-    if (onResults) void router.invalidate();
-  }
+  // The language is picked on the home screen only; every other page follows that choice.
+  const { lang: uiLang, copy } = useLang();
   useEffect(() => {
     setAiModel(search.ai_model ?? readAiModel());
   }, [search.ai_model]);
@@ -621,16 +613,15 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
           }`}
         >
           <div className="mx-auto flex max-w-6xl flex-col px-4 py-3 sm:px-6">
-            <div className={`flex items-center justify-between gap-3 ${chrome === "search" && !open ? "hidden" : ""}`}>
-              <button
-                type="button"
-                onClick={goHome}
-                className="w-fit font-display text-2xl tracking-tight text-ink transition-transform duration-150 ease-out active:scale-[0.96]"
-              >
-                Folio
-              </button>
-              <LanguagePicker onChange={onPageLang} compact />
-            </div>
+            <button
+              type="button"
+              onClick={goHome}
+              className={`w-fit font-display text-2xl tracking-tight text-ink transition-transform duration-150 ease-out active:scale-[0.96] ${
+                chrome === "search" && !open ? "hidden" : ""
+              }`}
+            >
+              Folio
+            </button>
             <div className={chrome === "search" && !open ? "" : "pt-4"}>{searchForm}</div>
             <div className={chrome === "search" && !open ? "hidden" : "pt-4"}>{sourcePills}</div>
           </div>
@@ -639,7 +630,7 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
         <>
         <header className="flex min-h-screen flex-col items-center bg-bg px-4 pt-[18vh]">
           <div className="fixed top-4 end-4 z-30">
-            <LanguagePicker onChange={onPageLang} />
+            <LanguagePicker />
           </div>
           <h1 className="mb-6 max-w-xl text-center font-display text-4xl leading-tight tracking-tight text-ink sm:text-5xl">
             {copy.h1}
@@ -694,7 +685,6 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
             onDive={(value) => go(value)}
             aiModel={aiModel}
             lang={uiLang}
-            onLang={chooseUiLang}
             copy={copy}
           />
         </main>
@@ -887,7 +877,6 @@ function Results({
   onDive,
   aiModel,
   lang,
-  onLang,
   copy,
 }: {
   query: string;
@@ -899,7 +888,6 @@ function Results({
   onDive: (query: string) => void;
   aiModel: string | undefined;
   lang: UiLang;
-  onLang: (lang: UiLang) => void;
   copy: UiCopy;
 }) {
   const blocks: SourceId[] = (["web", "wiki", "grok", "images"] as const).filter((key) => sources[key] && data);
@@ -920,7 +908,7 @@ function Results({
     setOpenId(null);
   }, [query, data]);
 
-  const aiCard = <AiAnswerCard query={query} data={data} loading={loading} sources={sources} aiModel={aiModel} copy={copy} lang={lang} onLang={onLang} />;
+  const aiCard = <AiAnswerCard query={query} data={data} loading={loading} sources={sources} aiModel={aiModel} copy={copy} lang={lang} />;
 
   if (!data) {
     return (
@@ -1080,7 +1068,6 @@ function Results({
           index={openIndex}
           total={flat.length}
           lang={lang}
-          onLang={onLang}
           onClose={() => setOpenId(null)}
           onPrev={() => {
             const prev = flat[openIndex - 1];
@@ -1123,7 +1110,6 @@ function AiAnswerCard({
   aiModel,
   copy,
   lang,
-  onLang,
 }: {
   query: string;
   data: SearchPayload | null;
@@ -1132,7 +1118,6 @@ function AiAnswerCard({
   aiModel: string | undefined;
   copy: UiCopy;
   lang: UiLang;
-  onLang: (lang: UiLang) => void;
 }) {
   const [providers, setProviders] = useState<AiModelStatus[] | "failed" | null>(null);
   const [state, setState] = useState<AiState | null>(null);
@@ -1234,7 +1219,6 @@ function AiAnswerCard({
               copy={copy}
               label={copy.listenAnswer}
               text={answer.parts.map((part) => ("text" in part ? part.text : " ")).join("").replace(/\s+/g, " ").trim()}
-              onLang={onLang}
             />
             {answer.citations.length > 0 ? (
               <ol className="mt-4 grid grid-cols-[minmax(0,1fr)] gap-1 border-t border-line pt-3">
@@ -1609,11 +1593,10 @@ function pickVoice(voices: SpeechSynthesisVoice[], lang: string, uri: string): S
 }
 
 /**
- * Read text aloud with the browser's speech synthesis in the page language. The language menu
- * here changes the site language too; when the text for the new language is ready (a translated
- * preview or a rewritten AI answer), reading starts in that language. With no installed voice for
- * the language, the utterance still carries the language tag so the system can pick one, and a
- * note says the voice may not match.
+ * Read text aloud with the browser's speech synthesis in the site language, which is picked on the
+ * home screen. Text that is still being translated (a preview) plays once it is ready. With no
+ * installed voice for the language, the utterance still carries the language tag so the system
+ * can pick one, and a note says the voice may not match.
  */
 function ReadAloud({
   text,
@@ -1622,7 +1605,6 @@ function ReadAloud({
   ready,
   copy,
   label,
-  onLang,
 }: {
   text: string;
   resetKey: string;
@@ -1630,7 +1612,6 @@ function ReadAloud({
   ready: boolean;
   copy: UiCopy;
   label?: string;
-  onLang: (lang: UiLang) => void;
 }) {
   const [supported, setSupported] = useState(false);
   const [rate, setRate] = useState(1);
@@ -1768,18 +1749,6 @@ function ReadAloud({
           <Volume2 className="size-4" aria-hidden="true" />
           {label ?? copy.listen}
         </button>
-        {open ? (
-          <LanguagePicker
-            compact
-            align="start"
-            label={copy.readingLanguage}
-            onChange={(next) => {
-              // Read again once the text exists in the new language.
-              pending.current = next;
-              onLang(next);
-            }}
-          />
-        ) : null}
       </div>
       {open ? (
         <div className="mt-2 grid gap-2">
@@ -1920,7 +1889,6 @@ function ResultPeek({
   index,
   total,
   lang,
-  onLang,
   onClose,
   onPrev,
   onNext,
@@ -1929,7 +1897,6 @@ function ResultPeek({
   index: number;
   total: number;
   lang: UiLang;
-  onLang: (lang: UiLang) => void;
   onClose: () => void;
   onPrev: () => void;
   onNext: () => void;
@@ -2046,10 +2013,6 @@ function ResultPeek({
     };
   }, [lang, native, previewReady, hit.id, sourceTitle, sourceBody]);
 
-  function chooseLang(next: UiLang) {
-    onLang(next);
-  }
-
   return (
     <div className="fixed inset-0 z-40">
       <button type="button" aria-label={copy.close} onClick={onClose} className="absolute inset-0 bg-ink/35" />
@@ -2130,7 +2093,6 @@ function ResultPeek({
             ready={speakReady}
             copy={copy}
             text={[shownTitle, shownText].filter(Boolean).join(". ")}
-            onLang={chooseLang}
           />
           {translating && !native ? <p className="mt-2 text-sm text-muted">{copy.translating}</p> : null}
           {translateError && !native ? <p className="mt-2 text-sm text-muted">{copy.translateFailed}</p> : null}

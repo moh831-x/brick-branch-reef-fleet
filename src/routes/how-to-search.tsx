@@ -80,8 +80,8 @@ function HowToSearchPage() {
           lead card is shown, Read the article opens the article in this window as well.
         </p>
         <p>
-          The language menu at the top of the home screen, the search pages, and these pages switches the whole site
-          between English, Bangla, Hindi, Arabic, Spanish, French, Simplified Chinese, Japanese, Portuguese, and German.
+          The language menu at the top of the home screen switches the whole site, including search pages and these
+          pages, between English, Bangla, Hindi, Arabic, Spanish, French, Simplified Chinese, Japanese, Portuguese, and German.
           Arabic switches the layout to right to left. This browser remembers the choice. Until you pick one, Folio uses
           the first of your browser’s languages that it has, or English. A link can also set it with{" "}
           <span className="font-mono">?lang=</span>, for example <span className="font-mono">?lang=ar</span>.
@@ -92,8 +92,8 @@ function HowToSearchPage() {
           query shows the words that were searched. Grokipedia only has English pages, so it is searched with an English
           translation, and the line says so. The AI answer is written in the site language, and Listen on the answer
           reads it with a voice for that language. A preview in another language is translated into the site language;
-          a Wikipedia article from that language’s own Wikipedia is shown as it is. The language menu in the player
-          changes the site language as well. Changing it from the menu at the top of a results page runs the search again.
+          a Wikipedia article from that language’s own Wikipedia is shown as it is. To change the language, go back to
+          the home screen and pick another one there; your next search uses it.
         </p>
         <p>
           Click a picture to open the same preview with a larger copy of the image, its title, the site, and its size.
