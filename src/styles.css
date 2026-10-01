@@ -115,3 +115,27 @@
 html:lang(ar) * {
   letter-spacing: normal !important;
 }
+
+@media (min-width: 640px) {
+  .folio-peek { width: min(var(--peek-width, 32rem), 100%); }
+}
+.folio-peek-resize {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: -0.5rem;
+  width: 1rem;
+  align-items: center;
+  justify-content: center;
+  cursor: col-resize;
+  touch-action: none;
+  z-index: 1;
+}
+.folio-peek-resize span {
+  width: 0.25rem;
+  height: 3rem;
+  border-radius: 999px;
+  background: var(--color-muted);
+}
+.folio-peek-resize:hover span,
+.folio-peek-resize:focus-visible span { background: var(--color-accent); }
+.folio-peek-resize:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }

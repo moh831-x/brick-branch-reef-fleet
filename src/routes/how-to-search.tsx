@@ -72,7 +72,7 @@ function HowToSearchPage() {
         <p>
           Click the title or text of a result to open a preview panel. Close it with Escape or the close control.
           While it is open, the left and right arrow keys move to the previous or next result (on a right-to-left page,
-          the right arrow goes back). When the preview comes from Wikipedia or Grokipedia and the article has sections,
+          the right arrow goes back). When a web, Wikipedia, or Grokipedia preview has sections,
           Contents lists them. Choosing one scrolls to that part. Listen reads the preview aloud in the site language.
           The player’s voice button lists the voices this browser has installed for that language, and the choice is
           remembered. Pause, stop, and speed are on the player, and closing the preview stops it. Open page goes to the
