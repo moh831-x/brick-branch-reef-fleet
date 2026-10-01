@@ -189,8 +189,70 @@ export type AiAnswer =
       requested?: AnswerProviderId;
       /** Set-up providers that were tried first and failed. */
       failed: AnswerProviderId[];
+      /** The menu model the reader picked, when there was one. */
+      picked?: string;
+      /** Every model that was tried before the one that answered, with why it failed. */
+      attempts?: AiAttempt[];
     }
-  | { status: "unconfigured" | "no-context" | "error"; message: string; failed?: AnswerProviderId[] };
+  | {
+      status: "unconfigured" | "no-context" | "error";
+      message: string;
+      failed?: AnswerProviderId[];
+      picked?: string;
+      attempts?: AiAttempt[];
+    };
+
+/** Why one model did not answer. Never holds keys or the reader's text. */
+export type AiFailureKind =
+  | "plan"
+  | "auth"
+  | "bad-request"
+  | "not-found"
+  | "rate-limit"
+  | "timeout"
+  | "server"
+  | "empty"
+  | "network"
+  | "unavailable"
+  | "other";
+
+export type AiAttempt = {
+  provider: AnswerProviderId;
+  /** The model id that was sent (gateway or provider id), or the menu id when it was never sent. */
+  model: string;
+  kind: AiFailureKind;
+  /** HTTP status, when the provider replied. */
+  status?: number;
+  /** The provider's own short error message, cleaned of keys and the reader's text. */
+  detail?: string;
+};
+
+/** The menu label for a menu, gateway, or provider model id ("openai/gpt-6-astra" -> "GPT-6 Astra"). */
+export function aiModelLabelFor(model: string): string {
+  const spec = AI_MODELS.find((item) => item.id === model || item.gateway === model || item.direct === model);
+  return spec?.label ?? model;
+}
+
+function answeredBy(spec: AiModelSpec, model: string): boolean {
+  return [spec.id, spec.direct, spec.gateway].some((id) => Boolean(id) && (model === id || model.startsWith(`${id}-`)));
+}
+
+/**
+ * The models to name in "X didn't answer, so Y did": every failed attempt, plus the reader's pick
+ * whenever a different model wrote the answer, even from the same provider. Empty when the pick
+ * answered.
+ */
+export function fallbackFailures(answer: Extract<AiAnswer, { status: "ok" }>): string[] {
+  const labels: string[] = [];
+  const add = (label: string) => {
+    if (!labels.includes(label)) labels.push(label);
+  };
+  const spec = answer.picked ? AI_MODELS.find((item) => item.id === answer.picked) : undefined;
+  if (spec && !answeredBy(spec, answer.model)) add(spec.label);
+  for (const attempt of answer.attempts ?? []) add(aiModelLabelFor(attempt.model));
+  if (!labels.length && !answer.attempts) for (const id of answer.failed) add(aiProviderLabel(id));
+  return labels;
+}
 
 export const AI_MESSAGES = {
   unconfigured: "AI answers aren’t set up yet.",

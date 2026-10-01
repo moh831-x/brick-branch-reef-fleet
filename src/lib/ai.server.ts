@@ -24,6 +24,8 @@ import {
   modelReady,
   parseAiAnswer,
   type AiAnswer,
+  type AiAttempt,
+  type AiFailureKind,
   type AiContextItem,
   type AiKeyFlags,
   type AiModelStatus,
@@ -89,8 +91,12 @@ export const AI_PROVIDER_SPECS: Record<AiProviderId, ProviderSpec> = {
 
 export const ANTHROPIC_VERSION = "2023-06-01";
 const AI_TIMEOUT_MS = 20_000;
+/** Reasoning models (a menu model with `effort`) think first, so they get longer. */
+const AI_REASONING_TIMEOUT_MS = 35_000;
 /** Room for a few sentences plus any reasoning tokens the model spends first. */
 const MAX_OUTPUT_TOKENS = 1200;
+/** Extra room for the hidden reasoning tokens a reasoning model spends before it writes. */
+const REASONING_TOKENS = 3000;
 /** OpenAI-compatible endpoint. One key covers ChatGPT and Claude when they have no key of their own. */
 const AI_GATEWAY_BASE = "https://ai-gateway.vercel.sh/v1";
 /** Models the current AI Gateway plan can call. Direct provider keys still use their own defaults. */
@@ -137,8 +143,8 @@ export function availableAiProviders(env: Env = process.env): AiProviderId[] {
 
 /** How long a model the AI Gateway refused for the account's plan stays marked "needs a paid plan". */
 const PLAN_BLOCK_MS = 6 * 60 * 60_000;
-/** Gateway model id -> until when it is treated as refused (per server instance). */
-const gatewayPlanBlocks = new Map<string, number>();
+/** Gateway model id -> until when it is treated as refused, and what the gateway said (per server instance). */
+const gatewayPlanBlocks = new Map<string, { until: number; attempt?: AiAttempt }>();
 
 /**
  * Whether a failed AI Gateway reply means "this model is not on your plan / out of paid credits",
@@ -150,15 +156,21 @@ export function isPlanRefusal(status: number, body: string): boolean {
   return /\b(paid|plan|credits?|billing|upgrade|free (tier|plan|credits))\b/i.test(body);
 }
 
-export function markGatewayPlanBlocked(gatewayModel: string, now = Date.now()) {
-  gatewayPlanBlocks.set(gatewayModel, now + PLAN_BLOCK_MS);
+export function markGatewayPlanBlocked(gatewayModel: string, now = Date.now(), attempt?: AiAttempt) {
+  gatewayPlanBlocks.set(gatewayModel, { until: now + PLAN_BLOCK_MS, ...(attempt ? { attempt } : {}) });
+}
+
+/** The refusal that blocked this gateway model, while the block lasts. */
+function planBlockFor(gatewayModel: string | undefined, now = Date.now()): AiAttempt | undefined {
+  const block = gatewayModel ? gatewayPlanBlocks.get(gatewayModel) : undefined;
+  return block && block.until > now ? block.attempt : undefined;
 }
 
 /** Menu model ids the gateway has refused for this plan recently. */
 export function planBlockedModels(now = Date.now()): Set<string> {
   const out = new Set<string>();
   for (const spec of AI_MODELS) {
-    const until = spec.gateway ? gatewayPlanBlocks.get(spec.gateway) : undefined;
+    const until = spec.gateway ? gatewayPlanBlocks.get(spec.gateway)?.until : undefined;
     if (until === undefined) continue;
     if (until > now) out.add(spec.id);
     else gatewayPlanBlocks.delete(spec.gateway!);
@@ -251,8 +263,15 @@ export function buildProviderRequest(config: ProviderConfig, query: string, cont
           { role: "system", content: system },
           { role: "user", content: prompt },
         ],
-        // OpenAI reasoning models reject temperature and max_tokens; they use max_completion_tokens.
-        ...(openai ? { max_completion_tokens: MAX_OUTPUT_TOKENS } : { max_tokens: MAX_OUTPUT_TOKENS, temperature: 0.2 }),
+        // The AI Gateway documents `max_tokens` and maps it per provider (to max_completion_tokens for
+        // OpenAI reasoning models). OpenAI itself rejects temperature and max_tokens on reasoning
+        // models and wants max_completion_tokens. Reasoning tokens count against the budget, so a
+        // model with `effort` gets extra room or it can stop before writing anything.
+        ...(config.gateway
+          ? { max_tokens: outputBudget(config) }
+          : openai
+            ? { max_completion_tokens: outputBudget(config) }
+            : { max_tokens: MAX_OUTPUT_TOKENS, temperature: 0.2 }),
         // The AI Gateway takes a unified `reasoning` object; OpenAI and xAI take `reasoning_effort`.
         ...(config.effort ? (config.gateway ? { reasoning: { effort: config.effort } } : { reasoning_effort: config.effort }) : {}),
         stream: false,
@@ -261,11 +280,113 @@ export function buildProviderRequest(config: ProviderConfig, query: string, cont
   };
 }
 
+function outputBudget(config: ProviderConfig): number {
+  return config.effort ? MAX_OUTPUT_TOKENS + REASONING_TOKENS : MAX_OUTPUT_TOKENS;
+}
+
+/** One model call that did not produce an answer, with a reason that is safe to show and log. */
+export class AiCallError extends Error {
+  kind: AiFailureKind;
+  status?: number;
+  detail?: string;
+  constructor(kind: AiFailureKind, options: { status?: number; detail?: string } = {}) {
+    super([options.status ? `HTTP ${options.status}` : "", kind, options.detail ? `"${options.detail}"` : ""].filter(Boolean).join(" "));
+    this.name = "AiCallError";
+    this.kind = kind;
+    if (options.status !== undefined) this.status = options.status;
+    if (options.detail) this.detail = options.detail;
+  }
+}
+
+const DETAIL_MAX = 160;
+
+/**
+ * Make a provider's error text safe to log and show: no keys or tokens, none of the reader's
+ * query, one short line. Exported for tests.
+ */
+export function sanitizeDetail(text: string, query = ""): string {
+  let clean = text.replace(/\s+/g, " ");
+  const q = query.replace(/\s+/g, " ").trim();
+  if (q.length >= 3) clean = clean.split(q).join("[query]");
+  clean = clean
+    .replace(/Bearer\s+\S+/gi, "Bearer [redacted]")
+    .replace(/\b(sk|xai|vck|key|pk|rk)[-_][A-Za-z0-9_-]{8,}/gi, "[redacted]")
+    .replace(/[A-Za-z0-9_-]{32,}/g, "[redacted]")
+    .trim();
+  return clean.length <= DETAIL_MAX ? clean : `${clean.slice(0, DETAIL_MAX - 1).trimEnd()}…`;
+}
+
+/** Pull "message (type=…, code=…)" out of an OpenAI- or Anthropic-style error body. Exported for tests. */
+export function errorDetail(body: string, query = ""): string | undefined {
+  let text = body.trim();
+  try {
+    const parsed = JSON.parse(body) as { error?: unknown; message?: unknown; type?: unknown };
+    const error = (typeof parsed.error === "object" && parsed.error !== null ? parsed.error : parsed) as Record<string, unknown>;
+    const message = typeof error.message === "string" ? error.message : typeof parsed.error === "string" ? parsed.error : "";
+    const tags = (["type", "code"] as const)
+      .map((name) => (typeof error[name] === "string" || typeof error[name] === "number" ? `${name}=${String(error[name])}` : ""))
+      .filter(Boolean);
+    text = [message, tags.length ? `(${tags.join(", ")})` : ""].filter(Boolean).join(" ");
+  } catch {
+    // Not JSON: keep the start of the text (an HTML error page is cut short below).
+    if (/^<!doctype|^<html/i.test(text)) text = "";
+  }
+  return sanitizeDetail(text, query) || undefined;
+}
+
+/** Sort a failed HTTP reply into a reason the reader can act on. Exported for tests. */
+export function classifyFailure(status: number, body: string): AiFailureKind {
+  if (isPlanRefusal(status, body)) return "plan";
+  if (status === 401 || status === 403) return "auth";
+  // xAI answers a bad key with 400.
+  if (status === 400 && /\b(api key|authentication|unauthori[sz]ed)\b/i.test(body)) return "auth";
+  if (status === 404) return "not-found";
+  if (status === 429) return "rate-limit";
+  if (status === 408 || status === 504) return "timeout";
+  if (status >= 500) return "server";
+  if (status >= 400) return "bad-request";
+  return "other";
+}
+
+/** Turn whatever a call threw into an attempt record. Exported for tests. */
+export function attemptFrom(config: ProviderConfig, error: unknown): AiAttempt {
+  const base = { provider: config.id, model: config.model };
+  if (error instanceof AiCallError) {
+    return {
+      ...base,
+      kind: error.kind,
+      ...(error.status !== undefined ? { status: error.status } : {}),
+      ...(error.detail ? { detail: error.detail } : {}),
+    };
+  }
+  if (error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError")) {
+    return { ...base, kind: "timeout", detail: `no reply within ${Math.round(timeoutFor(config) / 1000)} s` };
+  }
+  if (error instanceof TypeError) return { ...base, kind: "network", detail: sanitizeDetail(error.message) || undefined };
+  if (error instanceof SyntaxError) return { ...base, kind: "other", detail: "reply was not JSON" };
+  return { ...base, kind: "other", ...(error instanceof Error && error.message ? { detail: sanitizeDetail(error.message) } : {}) };
+}
+
+function timeoutFor(config: ProviderConfig): number {
+  return config.effort ? AI_REASONING_TIMEOUT_MS : AI_TIMEOUT_MS;
+}
+
+/** One line for the server log: provider, model, and why. Never the key or the reader's text. */
+export function attemptLogLine(attempt: AiAttempt): string {
+  const why = [attempt.status ? `HTTP ${attempt.status}` : "", attempt.kind, attempt.detail ? `"${attempt.detail}"` : ""]
+    .filter(Boolean)
+    .join(" ");
+  return `[ai] ${attempt.provider} ${attempt.model} failed: ${why}`;
+}
+
 type ChatCompletion = { model?: string; choices?: Array<{ finish_reason?: string; message?: { content?: string | null } }> };
 type AnthropicMessage = { model?: string; content?: Array<{ type?: string; text?: string }> };
 
 /** Pull the answer text and model name out of a provider response. Exported for tests. */
-export function readProviderResponse(config: ProviderConfig, body: unknown): { raw: string; model: string } {
+export function readProviderResponse(
+  config: ProviderConfig,
+  body: unknown,
+): { raw: string; model: string; finishReason?: string } {
   if (config.api === "anthropic") {
     const message = body as AnthropicMessage;
     const raw = (message.content ?? [])
@@ -273,10 +394,16 @@ export function readProviderResponse(config: ProviderConfig, body: unknown): { r
       .map((block) => block.text)
       .join(" ")
       .trim();
-    return { raw, model: message.model || config.model };
+    const stop = (body as { stop_reason?: unknown }).stop_reason;
+    return { raw, model: message.model || config.model, ...(typeof stop === "string" ? { finishReason: stop } : {}) };
   }
   const completion = body as ChatCompletion;
-  return { raw: completion.choices?.[0]?.message?.content?.trim() ?? "", model: completion.model || config.model };
+  const choice = completion.choices?.[0];
+  return {
+    raw: choice?.message?.content?.trim() ?? "",
+    model: completion.model || config.model,
+    ...(choice?.finish_reason ? { finishReason: choice.finish_reason } : {}),
+  };
 }
 
 /** Every page language, English included (Grokipedia queries are translated into English). */
@@ -569,21 +696,20 @@ async function askProvider(
   language?: string,
 ) {
   const request = buildProviderRequest(config, query, context, language);
-  const response = await fetcher(request.url, { ...request.init, signal: AbortSignal.timeout(AI_TIMEOUT_MS) });
-  // Log the status only: never the key, and never the reader's query.
+  const response = await fetcher(request.url, { ...request.init, signal: AbortSignal.timeout(timeoutFor(config)) });
+  // Keep the status and the provider's own short message; never the key, and never the reader's query.
   if (!response.ok) {
-    if (config.gateway) {
-      const body = await response.text().catch(() => "");
-      if (isPlanRefusal(response.status, body.slice(0, 2000))) {
-        markGatewayPlanBlocked(config.model);
-        throw new Error(`HTTP ${response.status} (plan)`);
-      }
-    }
-    throw new Error(`HTTP ${response.status}`);
+    const body = (await response.text().catch(() => "")).slice(0, 4000);
+    const kind = classifyFailure(response.status, body);
+    const error = new AiCallError(kind, { status: response.status, detail: errorDetail(body, query) });
+    if (config.gateway && kind === "plan") markGatewayPlanBlocked(config.model, Date.now(), attemptFrom(config, error));
+    throw error;
   }
-  const { raw, model } = readProviderResponse(config, await response.json());
+  const { raw, model, finishReason } = readProviderResponse(config, await response.json());
   const parsed = parseAiAnswer(raw, context);
-  if (!parsed.text) throw new Error("empty answer");
+  if (!parsed.text) {
+    throw new AiCallError("empty", { detail: finishReason ? `finish_reason=${sanitizeDetail(finishReason)}` : "no text in reply" });
+  }
   return { ...parsed, model };
 }
 
@@ -612,22 +738,44 @@ export async function runAiAnswer(
     seen.add(key);
     queue.push(config);
   };
-  if (modelId) push(configForModel(modelId, env));
-  for (const id of order) push(readProviderConfig(id, env));
-  if (!queue.length) return { status: "unconfigured", message: AI_MESSAGES.unconfigured };
-  if (!context.length) return { status: "no-context", message: AI_MESSAGES.noContext };
-
+  const attempts: AiAttempt[] = [];
   const failed: AnswerProviderId[] = [];
+  const pickedSpec = modelId ? AI_MODELS.find((model) => model.id === modelId) : undefined;
+  if (pickedSpec) {
+    const config = configForModel(pickedSpec.id, env);
+    if (config) push(config);
+    else {
+      // The pick can't be called right now. Say so instead of quietly answering with another model.
+      const blocked = planBlockFor(pickedSpec.gateway);
+      attempts.push(
+        blocked
+          ? { ...blocked, detail: sanitizeDetail(`refused earlier on this server${blocked.detail ? `: ${blocked.detail}` : ""}`) }
+          : {
+              provider: pickedSpec.provider,
+              model: pickedSpec.id,
+              kind: "unavailable",
+              detail: modelNote(pickedSpec, aiKeyFlags(env), planBlockedModels()) ?? "not set up on this server",
+            },
+      );
+      failed.push(pickedSpec.provider);
+    }
+  }
+  for (const id of order) push(readProviderConfig(id, env));
+  const picked = pickedSpec ? { picked: pickedSpec.id } : {};
+  if (!queue.length) return { status: "unconfigured", message: AI_MESSAGES.unconfigured, ...picked };
+  if (!context.length) return { status: "no-context", message: AI_MESSAGES.noContext, ...picked };
+
   for (const config of queue) {
     try {
       const answer = await askProvider(config, query, context, fetcher, options.answerLanguage);
       const requested = pickedProvider ?? providerPref;
-      return { status: "ok", ...answer, provider: config.id, ...(requested ? { requested } : {}), failed };
+      return { status: "ok", ...answer, provider: config.id, ...(requested ? { requested } : {}), failed, ...picked, attempts };
     } catch (error) {
-      const reason = error instanceof Error ? error.message.slice(0, 40) : "unknown";
-      console.error(`[ai] ${config.id} ${config.model} failed (${reason})`);
+      const attempt = attemptFrom(config, error);
+      console.error(attemptLogLine(attempt));
+      attempts.push(attempt);
       if (!failed.includes(config.id)) failed.push(config.id);
     }
   }
-  return { status: "error", message: AI_MESSAGES.error, failed };
+  return { status: "error", message: AI_MESSAGES.error, failed, ...picked, attempts };
 }

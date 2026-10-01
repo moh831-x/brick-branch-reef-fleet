@@ -7,7 +7,12 @@ import {
   buildProviderRequest,
   aiModelStatus,
   configForModel,
+  attemptFrom,
+  attemptLogLine,
+  classifyFailure,
+  errorDetail,
   isPlanRefusal,
+  sanitizeDetail,
   planBlockedModels,
   readProviderConfig,
   readProviderResponse,
@@ -218,7 +223,9 @@ describe("GPT-6 Astra and Claude through the AI Gateway", () => {
     assert.deepEqual(sent.reasoning, { effort: "low" });
     assert.equal(sent.reasoning_effort, undefined);
     assert.equal(sent.temperature, undefined);
-    assert.equal(sent.max_completion_tokens, 1200);
+    // The gateway documents max_tokens; reasoning tokens need room on top of the answer.
+    assert.equal(sent.max_tokens, 4200);
+    assert.equal(sent.max_completion_tokens, undefined);
     assert.equal(sent.stream, false);
 
     for (const [id, model] of [
@@ -230,6 +237,9 @@ describe("GPT-6 Astra and Claude through the AI Gateway", () => {
       const claude = body(buildProviderRequest(config, "dogs", context).init);
       assert.equal(claude.model, model);
       assert.equal(claude.reasoning, undefined);
+      assert.equal(claude.max_tokens, 1200);
+      assert.equal(claude.max_completion_tokens, undefined);
+      assert.equal(claude.temperature, undefined);
     }
   });
 
@@ -239,6 +249,9 @@ describe("GPT-6 Astra and Claude through the AI Gateway", () => {
     const sent = body(buildProviderRequest(astra, "dogs", context).init);
     assert.equal(sent.model, "gpt-6-astra");
     assert.equal(sent.reasoning_effort, "low");
+    assert.equal(sent.max_completion_tokens, 4200);
+    assert.equal(sent.max_tokens, undefined);
+    assert.equal(sent.temperature, undefined);
     const haiku = configForModel("claude-haiku-4.5", { ANTHROPIC_API_KEY: "a" });
     assert.ok(haiku);
     const request = buildProviderRequest(haiku, "dogs", context);
@@ -278,7 +291,15 @@ describe("GPT-6 Astra and Claude through the AI Gateway", () => {
     assert.ok(sonnet.status === "ok");
     assert.equal(sonnet.provider, "claude", "falls back to the gateway's Claude default");
     assert.equal(sonnet.model, "anthropic/claude-3-haiku");
+    assert.equal(sonnet.picked, "claude-sonnet-5.5");
+    assert.deepEqual(sonnet.attempts?.map((a) => [a.model, a.kind, a.status]), [["anthropic/claude-sonnet-5.5", "plan", 403]]);
+    assert.match(sonnet.attempts?.[0]?.detail ?? "", /Free credits cannot be used/);
     assert.ok(planBlockedModels().has("claude-sonnet-5.5"));
+    // Picked again while blocked: still named as the model that didn't answer, with the earlier reason.
+    const again = await runAiAnswer("dogs", context, "claude-sonnet-5.5", { env: GATEWAY, fetcher });
+    assert.ok(again.status === "ok");
+    assert.equal(again.attempts?.[0]?.kind, "plan");
+    assert.match(again.attempts?.[0]?.detail ?? "", /^refused earlier on this server: .*Free credits/);
     const row = aiModelStatus(GATEWAY).find((model) => model.id === "claude-sonnet-5.5");
     assert.deepEqual({ available: row?.available, note: row?.note }, { available: false, note: "needs a paid plan" });
     assert.equal(configForModel("claude-sonnet-5.5", GATEWAY), null);
@@ -287,3 +308,59 @@ describe("GPT-6 Astra and Claude through the AI Gateway", () => {
   });
 });
 
+
+describe("why a model didn't answer", () => {
+  it("sorts HTTP failures", () => {
+    assert.equal(classifyFailure(402, ""), "plan");
+    assert.equal(classifyFailure(401, "bad key"), "auth");
+    assert.equal(classifyFailure(403, "forbidden"), "auth");
+    assert.equal(classifyFailure(400, '{"error":{"message":"Unsupported parameter: max_tokens"}}'), "bad-request");
+    assert.equal(classifyFailure(404, ""), "not-found");
+    assert.equal(classifyFailure(400, '{"error":"Incorrect API key provided."}'), "auth");
+    assert.equal(classifyFailure(429, ""), "rate-limit");
+    assert.equal(classifyFailure(503, ""), "server");
+  });
+
+  it("keeps the gateway's message, type, and code, without keys or the reader's query", () => {
+    const detail = errorDetail(
+      JSON.stringify({ error: { message: "Model failed for nike stock price, key sk-abcdefghijklmnop", type: "invalid_request_error", code: 400 } }),
+      "nike stock price",
+    );
+    assert.equal(detail, "Model failed for [query], key [redacted] (type=invalid_request_error, code=400)");
+    assert.equal(errorDetail("<html><body>Bad gateway</body></html>"), undefined);
+    assert.equal(sanitizeDetail("Bearer vck_123456789012345 x".repeat(1)), "Bearer [redacted] x");
+    assert.ok(sanitizeDetail("a".repeat(20) + " " + "word ".repeat(80)).length <= 160);
+  });
+
+  it("names timeouts and empty replies", async () => {
+    const config = configForModel("gpt-6-astra", { AI_GATEWAY_API_KEY: "g" });
+    assert.ok(config);
+    const timeout = Object.assign(new Error("aborted"), { name: "TimeoutError" });
+    assert.deepEqual(attemptFrom(config, timeout), { provider: "openai", model: "openai/gpt-6-astra", kind: "timeout", detail: "no reply within 35 s" });
+    assert.equal(
+      attemptLogLine({ provider: "claude", model: "anthropic/claude-sonnet-5.5", kind: "plan", status: 402, detail: "Insufficient credits" }),
+      '[ai] claude anthropic/claude-sonnet-5.5 failed: HTTP 402 plan "Insufficient credits"',
+    );
+
+    const fetcher = (async (_url: string | URL, init?: RequestInit) => {
+      const model = String(body(init ?? {}).model);
+      if (model === "openai/gpt-6-astra") return Response.json({ model, choices: [{ finish_reason: "length", message: { content: "" } }] });
+      return Response.json({ model, choices: [{ message: { content: "Fine [1]." } }] });
+    }) as typeof fetch;
+    const answer = await runAiAnswer("dogs", context, "gpt-6-astra", { env: { AI_GATEWAY_API_KEY: "g" }, fetcher });
+    assert.ok(answer.status === "ok");
+    assert.equal(answer.model, "openai/gpt-4.1-mini");
+    assert.equal(answer.provider, "openai");
+    assert.deepEqual(answer.attempts, [{ provider: "openai", model: "openai/gpt-6-astra", kind: "empty", detail: "finish_reason=length" }]);
+  });
+
+  it("reports a pick that isn't set up instead of switching quietly", async () => {
+    const fetcher = (async (_url: string | URL, init?: RequestInit) =>
+      Response.json({ model: String(body(init ?? {}).model), choices: [{ message: { content: "Hi [1]." } }] })) as typeof fetch;
+    const answer = await runAiAnswer("dogs", context, "claude-haiku-4.5", { env: { XAI_API_KEY: "x" }, fetcher });
+    assert.ok(answer.status === "ok");
+    assert.equal(answer.provider, "grok");
+    assert.equal(answer.attempts?.[0]?.kind, "unavailable");
+    assert.equal(answer.attempts?.[0]?.model, "claude-haiku-4.5");
+  });
+});

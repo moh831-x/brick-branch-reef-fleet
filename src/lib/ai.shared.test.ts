@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import {
   AI_MODELS,
   AI_MAX_CONTEXT,
+  aiModelLabelFor,
+  fallbackFailures,
   aiChoiceOf,
   aiProviderOf,
   aiProviderOrder,
@@ -16,6 +18,7 @@ import {
   selectedAiProvider,
   type AiContextItem,
   type AiKeyFlags,
+  type AiAnswer,
 } from "./ai.shared.ts";
 
 const hit = (n: number, host = "example.com") => ({ title: `Title ${n}`, url: `https://${host}/${n}`, snippet: `Snippet ${n}` });
@@ -170,3 +173,42 @@ describe("AI model menu", () => {
   });
 });
 
+
+describe("fallback note", () => {
+  const ok = (extra: Partial<Extract<AiAnswer, { status: "ok" }>>): Extract<AiAnswer, { status: "ok" }> => ({
+    status: "ok",
+    text: "x",
+    parts: [],
+    citations: [],
+    model: "openai/gpt-4.1-mini",
+    provider: "openai",
+    failed: [],
+    ...extra,
+  });
+
+  it("names the pick when another model of the same provider answered", () => {
+    assert.deepEqual(fallbackFailures(ok({ picked: "gpt-6-astra", failed: ["openai"], attempts: [{ provider: "openai", model: "openai/gpt-6-astra", kind: "timeout" }] })), ["GPT-6 Astra"]);
+    // Even with no attempt recorded (an older server), a different model means the pick didn't answer.
+    assert.deepEqual(fallbackFailures(ok({ picked: "gpt-6-astra" })), ["GPT-6 Astra"]);
+  });
+
+  it("says nothing when the pick answered", () => {
+    assert.deepEqual(fallbackFailures(ok({ picked: "gpt-4.1-mini", attempts: [] })), []);
+    assert.deepEqual(fallbackFailures(ok({ picked: "claude-haiku-4.5", model: "claude-haiku-4-5-20251001", provider: "claude", attempts: [] })), []);
+  });
+
+  it("lists every model tried before the one that answered", () => {
+    const answer = ok({
+      model: "grok-4.3",
+      provider: "grok",
+      picked: "claude-sonnet-5.5",
+      failed: ["claude"],
+      attempts: [
+        { provider: "claude", model: "anthropic/claude-sonnet-5.5", kind: "plan", status: 402 },
+        { provider: "claude", model: "anthropic/claude-3-haiku", kind: "bad-request", status: 400 },
+      ],
+    });
+    assert.deepEqual(fallbackFailures(answer), ["Claude Sonnet 5.5", "anthropic/claude-3-haiku"]);
+    assert.equal(aiModelLabelFor("openai/gpt-6-astra"), "GPT-6 Astra");
+  });
+});
