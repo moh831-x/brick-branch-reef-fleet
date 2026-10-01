@@ -1,7 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  AI_MODELS,
   AI_MAX_CONTEXT,
+  aiModelLabelFor,
+  fallbackFailures,
   aiChoiceOf,
   aiProviderOf,
   aiProviderOrder,
@@ -15,6 +18,7 @@ import {
   selectedAiProvider,
   type AiContextItem,
   type AiKeyFlags,
+  type AiAnswer,
 } from "./ai.shared.ts";
 
 const hit = (n: number, host = "example.com") => ({ title: `Title ${n}`, url: `https://${host}/${n}`, snippet: `Snippet ${n}` });
@@ -80,14 +84,15 @@ describe("AI providers", () => {
   it("keeps a model the reader can run, and maps an old provider id to that provider's default", () => {
     const keys: AiKeyFlags = { grok: true, openai: false, claude: false, gateway: true };
     assert.equal(modelReady({ id: "grok-4.7", label: "Grok 4.7", provider: "grok", direct: "grok-4.7" }, keys), true);
-    assert.equal(
-      modelReady(
-        { id: "claude-sonnet-5.5", label: "Claude", provider: "claude", direct: "claude-sonnet-5-5", gateway: "anthropic/claude-sonnet-5.5", paidGateway: true },
-        keys,
-      ),
-      false,
-    );
-    assert.equal(modelNote({ id: "claude-sonnet-5.5", label: "Claude", provider: "claude", gateway: "x", paidGateway: true }, keys), "needs a paid plan");
+    const sonnet = { id: "claude-sonnet-5.5", label: "Claude", provider: "claude", direct: "claude-sonnet-5-5", gateway: "anthropic/claude-sonnet-5.5" } as const;
+    // Through the gateway it can be picked until the gateway refuses it for the plan.
+    assert.equal(modelReady(sonnet, keys), true);
+    assert.equal(modelNote(sonnet, keys), undefined);
+    assert.equal(modelReady(sonnet, keys, new Set(["claude-sonnet-5.5"])), false);
+    assert.equal(modelNote(sonnet, keys, new Set(["claude-sonnet-5.5"])), "needs a paid plan");
+    // With Anthropic's own key the plan does not matter.
+    assert.equal(modelReady(sonnet, { ...keys, claude: true }, new Set(["claude-sonnet-5.5"])), true);
+    assert.equal(modelNote(sonnet, { grok: true, openai: false, claude: false, gateway: false }), "not set up");
     assert.equal(selectedAiModel("grok-4.7", ["grok-4.3", "grok-4.7", "gpt-4.1-mini"]), "grok-4.7");
     assert.equal(selectedAiModel("openai", ["grok-4.3", "gpt-4.1-mini", "gpt-4o-mini"]), "gpt-4.1-mini");
     assert.equal(selectedAiModel(undefined, ["gpt-4o-mini", "grok-4.3"]), "grok-4.3");
@@ -146,5 +151,64 @@ describe("parseAiAnswer", () => {
     const parsed = parseAiAnswer("The results don't say.", context);
     assert.deepEqual(parsed.citations, []);
     assert.deepEqual(parsed.parts, [{ text: "The results don't say." }]);
+  });
+});
+
+describe("AI model menu", () => {
+  it("lists GPT-6 Astra and the Claude models with AI Gateway ids", () => {
+    const byId = new Map(AI_MODELS.map((model) => [model.id, model]));
+    assert.deepEqual(
+      { ...byId.get("gpt-6-astra") },
+      { id: "gpt-6-astra", label: "GPT-6 Astra", provider: "openai", direct: "gpt-6-astra", gateway: "openai/gpt-6-astra", effort: "low", timeoutMs: 40_000 },
+    );
+    assert.equal(byId.get("claude-sonnet-5.5")?.gateway, "anthropic/claude-sonnet-5.5");
+    assert.equal(byId.get("claude-haiku-4.5")?.gateway, "anthropic/claude-haiku-4.5");
+    assert.equal(byId.get("claude-haiku-4.5")?.direct, "claude-haiku-4-5");
+    assert.equal(aiChoiceOf("GPT-6-Astra"), "gpt-6-astra");
+    // Order: each company's strongest model first.
+    const ids = AI_MODELS.map((model) => model.id);
+    assert.ok(ids.indexOf("gpt-6-astra") < ids.indexOf("gpt-4.1-mini"));
+    assert.ok(ids.indexOf("claude-sonnet-5.5") < ids.indexOf("claude-haiku-4.5"));
+    assert.equal(new Set(ids).size, ids.length);
+  });
+});
+
+
+describe("fallback note", () => {
+  const ok = (extra: Partial<Extract<AiAnswer, { status: "ok" }>>): Extract<AiAnswer, { status: "ok" }> => ({
+    status: "ok",
+    text: "x",
+    parts: [],
+    citations: [],
+    model: "openai/gpt-4.1-mini",
+    provider: "openai",
+    failed: [],
+    ...extra,
+  });
+
+  it("names the pick when another model of the same provider answered", () => {
+    assert.deepEqual(fallbackFailures(ok({ picked: "gpt-6-astra", failed: ["openai"], attempts: [{ provider: "openai", model: "openai/gpt-6-astra", kind: "timeout" }] })), ["GPT-6 Astra"]);
+    // Even with no attempt recorded (an older server), a different model means the pick didn't answer.
+    assert.deepEqual(fallbackFailures(ok({ picked: "gpt-6-astra" })), ["GPT-6 Astra"]);
+  });
+
+  it("says nothing when the pick answered", () => {
+    assert.deepEqual(fallbackFailures(ok({ picked: "gpt-4.1-mini", attempts: [] })), []);
+    assert.deepEqual(fallbackFailures(ok({ picked: "claude-haiku-4.5", model: "claude-haiku-4-5-20251001", provider: "claude", attempts: [] })), []);
+  });
+
+  it("lists every model tried before the one that answered", () => {
+    const answer = ok({
+      model: "grok-4.3",
+      provider: "grok",
+      picked: "claude-sonnet-5.5",
+      failed: ["claude"],
+      attempts: [
+        { provider: "claude", model: "anthropic/claude-sonnet-5.5", kind: "plan", status: 402 },
+        { provider: "claude", model: "anthropic/claude-3-haiku", kind: "bad-request", status: 400 },
+      ],
+    });
+    assert.deepEqual(fallbackFailures(answer), ["Claude Sonnet 5.5", "anthropic/claude-3-haiku"]);
+    assert.equal(aiModelLabelFor("openai/gpt-6-astra"), "GPT-6 Astra");
   });
 });

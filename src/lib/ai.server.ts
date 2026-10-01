@@ -19,11 +19,14 @@ import {
   aiModelOf,
   aiProviderOf,
   aiProviderOrder,
+  AI_DEFAULT_TIMEOUT_MS,
   buildAiPrompt,
   modelNote,
   modelReady,
   parseAiAnswer,
   type AiAnswer,
+  type AiAttempt,
+  type AiFailureKind,
   type AiContextItem,
   type AiKeyFlags,
   type AiModelStatus,
@@ -88,15 +91,36 @@ export const AI_PROVIDER_SPECS: Record<AiProviderId, ProviderSpec> = {
 };
 
 export const ANTHROPIC_VERSION = "2023-06-01";
-const AI_TIMEOUT_MS = 20_000;
+/** Reasoning models without their own `timeoutMs` (a custom effort) think first, so they get longer. */
+const AI_REASONING_TIMEOUT_MS = 35_000;
+/**
+ * Everything one answer may take, fallbacks included. Stays under the function's maxDuration (60 s,
+ * set in vite.config.ts) with room to send the reply.
+ */
+export const AI_TOTAL_MS = 52_000;
+/** When the pick is a slow model still thinking after this long, the fallback starts alongside it. */
+export const AI_HEDGE_MS = 15_000;
+/** A call with less time than this left is not started. */
+const MIN_CALL_MS = 4_000;
+/** Pause before the one retry after a provider 5xx. */
+const RETRY_DELAY_MS = 500;
+
+/** Server errors worth one more try (not 504, which is already a timeout). */
+function isRetryable(attempt: AiAttempt): boolean {
+  return attempt.kind === "server" && attempt.status !== undefined && attempt.status !== 504;
+}
 /** Room for a few sentences plus any reasoning tokens the model spends first. */
 const MAX_OUTPUT_TOKENS = 1200;
+/** Extra room for the hidden reasoning tokens a reasoning model spends before it writes. */
+const REASONING_TOKENS = 3000;
 /** OpenAI-compatible endpoint. One key covers ChatGPT and Claude when they have no key of their own. */
 const AI_GATEWAY_BASE = "https://ai-gateway.vercel.sh/v1";
 /** Models the current AI Gateway plan can call. Direct provider keys still use their own defaults. */
 const AI_GATEWAY_MODELS = {
   openai: "openai/gpt-4.1-mini",
-  claude: "anthropic/claude-3-haiku",
+  // Claude 3 Haiku was retired by Anthropic on Apr 20, 2026; the gateway still lists it but calls
+  // fail with HTTP 500 (AI_APICallError). Haiku 4.5 is Anthropic's named replacement.
+  claude: "anthropic/claude-haiku-4.5",
 } as const;
 
 export type ProviderConfig = {
@@ -106,6 +130,8 @@ export type ProviderConfig = {
   baseUrl: string;
   model: string;
   effort?: string;
+  /** Per-call limit; defaults to AI_DEFAULT_TIMEOUT_MS (35 s for a custom reasoning effort). */
+  timeoutMs?: number;
   /** True when this call goes through Vercel AI Gateway instead of the provider's own API. */
   gateway?: boolean;
 };
@@ -118,8 +144,11 @@ export function readProviderConfig(id: AiProviderId, env: Env = process.env): Pr
   const viaGateway = !ownKey;
   const model =
     env[spec.modelVar]?.trim() || (viaGateway && id !== "grok" ? AI_GATEWAY_MODELS[id] : spec.defaultModel);
-  const effort =
-    (spec.effortVar && env[spec.effortVar]?.trim()) || (!viaGateway && model === spec.defaultModel ? spec.defaultEffort : undefined);
+  // Effort only goes to the provider's own API. Through the gateway it would become a `reasoning`
+  // object, which non-reasoning defaults (GPT-4.1 mini, Claude Haiku 4.5) don't take.
+  const effort = viaGateway
+    ? undefined
+    : (spec.effortVar && env[spec.effortVar]?.trim()) || (model === spec.defaultModel ? spec.defaultEffort : undefined);
   return {
     id,
     api: viaGateway ? "chat" : spec.api,
@@ -133,6 +162,43 @@ export function readProviderConfig(id: AiProviderId, env: Env = process.env): Pr
 
 export function availableAiProviders(env: Env = process.env): AiProviderId[] {
   return AI_PROVIDERS.map((provider) => provider.id).filter((id) => readProviderConfig(id, env) !== null);
+}
+
+/** How long a model the AI Gateway refused for the account's plan stays marked "needs a paid plan". */
+const PLAN_BLOCK_MS = 6 * 60 * 60_000;
+/** Gateway model id -> until when it is treated as refused, and what the gateway said (per server instance). */
+const gatewayPlanBlocks = new Map<string, { until: number; attempt?: AiAttempt }>();
+
+/**
+ * Whether a failed AI Gateway reply means "this model is not on your plan / out of paid credits",
+ * as opposed to a bad key, a bad request, or an outage. Exported for tests.
+ */
+export function isPlanRefusal(status: number, body: string): boolean {
+  if (status === 402) return true;
+  if (status !== 400 && status !== 403) return false;
+  return /\b(paid|plan|credits?|billing|upgrade|free (tier|plan|credits))\b/i.test(body);
+}
+
+export function markGatewayPlanBlocked(gatewayModel: string, now = Date.now(), attempt?: AiAttempt) {
+  gatewayPlanBlocks.set(gatewayModel, { until: now + PLAN_BLOCK_MS, ...(attempt ? { attempt } : {}) });
+}
+
+/** The refusal that blocked this gateway model, while the block lasts. */
+function planBlockFor(gatewayModel: string | undefined, now = Date.now()): AiAttempt | undefined {
+  const block = gatewayModel ? gatewayPlanBlocks.get(gatewayModel) : undefined;
+  return block && block.until > now ? block.attempt : undefined;
+}
+
+/** Menu model ids the gateway has refused for this plan recently. */
+export function planBlockedModels(now = Date.now()): Set<string> {
+  const out = new Set<string>();
+  for (const spec of AI_MODELS) {
+    const until = spec.gateway ? gatewayPlanBlocks.get(spec.gateway)?.until : undefined;
+    if (until === undefined) continue;
+    if (until > now) out.add(spec.id);
+    else gatewayPlanBlocks.delete(spec.gateway!);
+  }
+  return out;
 }
 
 /** What the selector needs: which providers are set up, and their model names. Never the keys. */
@@ -155,8 +221,9 @@ export function aiKeyFlags(env: Env = process.env): AiKeyFlags {
 /** Which listed models can run with the keys on this server. Never includes the keys. */
 export function aiModelStatus(env: Env = process.env): AiModelStatus[] {
   const keys = aiKeyFlags(env);
+  const blocked = planBlockedModels();
   return AI_MODELS.map((spec) => {
-    const note = modelNote(spec, keys);
+    const note = modelNote(spec, keys, blocked);
     return { id: spec.id, label: spec.label, provider: spec.provider, available: !note, ...(note ? { note } : {}) };
   });
 }
@@ -164,7 +231,7 @@ export function aiModelStatus(env: Env = process.env): AiModelStatus[] {
 /** Config for one menu model, using the provider's own key when it has one and the gateway otherwise. */
 export function configForModel(modelId: string, env: Env = process.env): ProviderConfig | null {
   const spec = AI_MODELS.find((model) => model.id === modelId);
-  if (!spec || !modelReady(spec, aiKeyFlags(env))) return null;
+  if (!spec || !modelReady(spec, aiKeyFlags(env), planBlockedModels())) return null;
   if (spec.provider === "gemini") {
     const apiKey = env.AI_GATEWAY_API_KEY?.trim();
     if (!apiKey || !spec.gateway) return null;
@@ -174,7 +241,7 @@ export function configForModel(modelId: string, env: Env = process.env): Provide
   if (!base) return null;
   const model = base.gateway ? spec.gateway : spec.direct;
   if (!model) return null;
-  return { ...base, model, effort: undefined };
+  return { ...base, model, effort: spec.effort, ...(spec.timeoutMs ? { timeoutMs: spec.timeoutMs } : {}) };
 }
 
 type Request = { url: string; init: RequestInit };
@@ -197,7 +264,7 @@ export function buildProviderRequest(config: ProviderConfig, query: string, cont
         },
         body: JSON.stringify({
           model: config.model,
-          max_tokens: MAX_OUTPUT_TOKENS,
+          max_tokens: outputBudget(config),
           system,
           messages: [{ role: "user", content: prompt }],
           ...(config.effort ? { output_config: { effort: config.effort } } : {}),
@@ -219,20 +286,146 @@ export function buildProviderRequest(config: ProviderConfig, query: string, cont
           { role: "system", content: system },
           { role: "user", content: prompt },
         ],
-        // OpenAI reasoning models reject temperature and max_tokens; they use max_completion_tokens.
-        ...(openai ? { max_completion_tokens: MAX_OUTPUT_TOKENS } : { max_tokens: MAX_OUTPUT_TOKENS, temperature: 0.2 }),
-        ...(config.effort ? { reasoning_effort: config.effort } : {}),
+        // The AI Gateway documents `max_tokens` and maps it per provider (to max_completion_tokens for
+        // OpenAI reasoning models). OpenAI itself rejects temperature and max_tokens on reasoning
+        // models and wants max_completion_tokens. Reasoning tokens count against the budget, so a
+        // model with `effort` gets extra room or it can stop before writing anything.
+        // xAI's reasoning models (Grok 4.7 and 4.6 always reason) take max_completion_tokens too;
+        // temperature is left at their default.
+        ...(config.gateway
+          ? { max_tokens: outputBudget(config) }
+          : openai || config.effort
+            ? { max_completion_tokens: outputBudget(config) }
+            : { max_tokens: outputBudget(config), temperature: 0.2 }),
+        // The AI Gateway takes a unified `reasoning` object; OpenAI and xAI take `reasoning_effort`.
+        ...(config.effort ? (config.gateway ? { reasoning: { effort: config.effort } } : { reasoning_effort: config.effort }) : {}),
         stream: false,
       }),
     },
   };
 }
 
+/**
+ * Output-token ceilings of models that are lower than our largest budget, so a request never asks
+ * for more than the model allows (a custom XAI_MODEL / OPENAI_MODEL / ANTHROPIC_MODEL included).
+ */
+const OUTPUT_CAPS: ReadonlyArray<[RegExp, number]> = [
+  [/claude-3-(haiku|opus|sonnet)/, 4096],
+  [/claude-3[.-]5/, 8192],
+  [/gpt-4o-mini|gpt-4o\b/, 16_384],
+];
+
+/** Output tokens to ask for: room for the answer, plus reasoning room when the model reasons. Exported for tests. */
+export function outputBudget(config: Pick<ProviderConfig, "model" | "effort">): number {
+  const want = config.effort ? MAX_OUTPUT_TOKENS + REASONING_TOKENS : MAX_OUTPUT_TOKENS;
+  const cap = OUTPUT_CAPS.find(([pattern]) => pattern.test(config.model))?.[1];
+  return cap ? Math.min(want, cap) : want;
+}
+
+/** One model call that did not produce an answer, with a reason that is safe to show and log. */
+export class AiCallError extends Error {
+  kind: AiFailureKind;
+  status?: number;
+  detail?: string;
+  constructor(kind: AiFailureKind, options: { status?: number; detail?: string } = {}) {
+    super([options.status ? `HTTP ${options.status}` : "", kind, options.detail ? `"${options.detail}"` : ""].filter(Boolean).join(" "));
+    this.name = "AiCallError";
+    this.kind = kind;
+    if (options.status !== undefined) this.status = options.status;
+    if (options.detail) this.detail = options.detail;
+  }
+}
+
+const DETAIL_MAX = 160;
+
+/**
+ * Make a provider's error text safe to log and show: no keys or tokens, none of the reader's
+ * query, one short line. Exported for tests.
+ */
+export function sanitizeDetail(text: string, query = ""): string {
+  let clean = text.replace(/\s+/g, " ");
+  const q = query.replace(/\s+/g, " ").trim();
+  if (q.length >= 3) clean = clean.split(q).join("[query]");
+  clean = clean
+    .replace(/Bearer\s+\S+/gi, "Bearer [redacted]")
+    .replace(/\b(sk|xai|vck|key|pk|rk)[-_][A-Za-z0-9_-]{8,}/gi, "[redacted]")
+    .replace(/[A-Za-z0-9_-]{32,}/g, "[redacted]")
+    .trim();
+  return clean.length <= DETAIL_MAX ? clean : `${clean.slice(0, DETAIL_MAX - 1).trimEnd()}…`;
+}
+
+/** Pull "message (type=…, code=…)" out of an OpenAI- or Anthropic-style error body. Exported for tests. */
+export function errorDetail(body: string, query = ""): string | undefined {
+  let text = body.trim();
+  try {
+    const parsed = JSON.parse(body) as { error?: unknown; message?: unknown; type?: unknown };
+    const error = (typeof parsed.error === "object" && parsed.error !== null ? parsed.error : parsed) as Record<string, unknown>;
+    const message = typeof error.message === "string" ? error.message : typeof parsed.error === "string" ? parsed.error : "";
+    const tags = (["type", "code"] as const)
+      .map((name) => (typeof error[name] === "string" || typeof error[name] === "number" ? `${name}=${String(error[name])}` : ""))
+      .filter(Boolean);
+    text = [message, tags.length ? `(${tags.join(", ")})` : ""].filter(Boolean).join(" ");
+  } catch {
+    // Not JSON: keep the start of the text (an HTML error page is cut short below).
+    if (/^<!doctype|^<html/i.test(text)) text = "";
+  }
+  return sanitizeDetail(text, query) || undefined;
+}
+
+/** Sort a failed HTTP reply into a reason the reader can act on. Exported for tests. */
+export function classifyFailure(status: number, body: string): AiFailureKind {
+  if (isPlanRefusal(status, body)) return "plan";
+  if (status === 401 || status === 403) return "auth";
+  // xAI answers a bad key with 400.
+  if (status === 400 && /\b(api key|authentication|unauthori[sz]ed)\b/i.test(body)) return "auth";
+  if (status === 404) return "not-found";
+  if (status === 429) return "rate-limit";
+  if (status === 408 || status === 504) return "timeout";
+  if (status >= 500) return "server";
+  if (status >= 400) return "bad-request";
+  return "other";
+}
+
+/** Turn whatever a call threw into an attempt record. Exported for tests. */
+export function attemptFrom(config: ProviderConfig, error: unknown, timeoutMs = timeoutFor(config)): AiAttempt {
+  const base = { provider: config.id, model: config.model };
+  if (error instanceof AiCallError) {
+    return {
+      ...base,
+      kind: error.kind,
+      ...(error.status !== undefined ? { status: error.status } : {}),
+      ...(error.detail ? { detail: error.detail } : {}),
+    };
+  }
+  if (error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError")) {
+    return { ...base, kind: "timeout", detail: `no reply within ${Math.round(timeoutMs / 1000)} s` };
+  }
+  if (error instanceof TypeError) return { ...base, kind: "network", detail: sanitizeDetail(error.message) || undefined };
+  if (error instanceof SyntaxError) return { ...base, kind: "other", detail: "reply was not JSON" };
+  return { ...base, kind: "other", ...(error instanceof Error && error.message ? { detail: sanitizeDetail(error.message) } : {}) };
+}
+
+/** How long one call to this model may take. Exported for tests. */
+export function timeoutFor(config: ProviderConfig): number {
+  return config.timeoutMs ?? (config.effort ? AI_REASONING_TIMEOUT_MS : AI_DEFAULT_TIMEOUT_MS);
+}
+
+/** One line for the server log: provider, model, and why. Never the key or the reader's text. */
+export function attemptLogLine(attempt: AiAttempt): string {
+  const why = [attempt.status ? `HTTP ${attempt.status}` : "", attempt.kind, attempt.detail ? `"${attempt.detail}"` : ""]
+    .filter(Boolean)
+    .join(" ");
+  return `[ai] ${attempt.provider} ${attempt.model} failed: ${why}`;
+}
+
 type ChatCompletion = { model?: string; choices?: Array<{ finish_reason?: string; message?: { content?: string | null } }> };
 type AnthropicMessage = { model?: string; content?: Array<{ type?: string; text?: string }> };
 
 /** Pull the answer text and model name out of a provider response. Exported for tests. */
-export function readProviderResponse(config: ProviderConfig, body: unknown): { raw: string; model: string } {
+export function readProviderResponse(
+  config: ProviderConfig,
+  body: unknown,
+): { raw: string; model: string; finishReason?: string } {
   if (config.api === "anthropic") {
     const message = body as AnthropicMessage;
     const raw = (message.content ?? [])
@@ -240,10 +433,16 @@ export function readProviderResponse(config: ProviderConfig, body: unknown): { r
       .map((block) => block.text)
       .join(" ")
       .trim();
-    return { raw, model: message.model || config.model };
+    const stop = (body as { stop_reason?: unknown }).stop_reason;
+    return { raw, model: message.model || config.model, ...(typeof stop === "string" ? { finishReason: stop } : {}) };
   }
   const completion = body as ChatCompletion;
-  return { raw: completion.choices?.[0]?.message?.content?.trim() ?? "", model: completion.model || config.model };
+  const choice = completion.choices?.[0];
+  return {
+    raw: choice?.message?.content?.trim() ?? "",
+    model: completion.model || config.model,
+    ...(choice?.finish_reason ? { finishReason: choice.finish_reason } : {}),
+  };
 }
 
 /** Every page language, English included (Grokipedia queries are translated into English). */
@@ -534,29 +733,51 @@ async function askProvider(
   context: AiContextItem[],
   fetcher: typeof fetch,
   language?: string,
+  limits: { timeoutMs?: number; signal?: AbortSignal } = {},
 ) {
   const request = buildProviderRequest(config, query, context, language);
-  const response = await fetcher(request.url, { ...request.init, signal: AbortSignal.timeout(AI_TIMEOUT_MS) });
-  // Log the status only: never the key, and never the reader's query.
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  const { raw, model } = readProviderResponse(config, await response.json());
+  const timeout = AbortSignal.timeout(limits.timeoutMs ?? timeoutFor(config));
+  const signal = limits.signal ? AbortSignal.any([timeout, limits.signal]) : timeout;
+  const response = await fetcher(request.url, { ...request.init, signal });
+  // Keep the status and the provider's own short message; never the key, and never the reader's query.
+  if (!response.ok) {
+    const body = (await response.text().catch(() => "")).slice(0, 4000);
+    const kind = classifyFailure(response.status, body);
+    const error = new AiCallError(kind, { status: response.status, detail: errorDetail(body, query) });
+    if (config.gateway && kind === "plan") markGatewayPlanBlocked(config.model, Date.now(), attemptFrom(config, error));
+    throw error;
+  }
+  const { raw, model, finishReason } = readProviderResponse(config, await response.json());
   const parsed = parseAiAnswer(raw, context);
-  if (!parsed.text) throw new Error("empty answer");
+  if (!parsed.text) {
+    throw new AiCallError("empty", { detail: finishReason ? `finish_reason=${sanitizeDetail(finishReason)}` : "no text in reply" });
+  }
   return { ...parsed, model };
 }
 
+type Answered = Awaited<ReturnType<typeof askProvider>> & { config: ProviderConfig };
+
 /**
  * Ask for a short cited answer. Tries the reader's pick first, then the other set-up providers.
- * Never throws: failures come back as a status the card can show.
+ * When the pick is a slow model (its own limit is longer than the hedge point) and it is still
+ * thinking after AI_HEDGE_MS, the fallback chain starts alongside it: the pick still wins if it
+ * answers within its limit, and if it doesn't, the fallback's answer is usually ready already.
+ * The whole thing stays within AI_TOTAL_MS. Never throws: failures come back as a status the card
+ * can show.
  */
 export async function runAiAnswer(
   query: string,
   context: AiContextItem[],
   preferred?: string,
-  options: { env?: Env; fetcher?: typeof fetch; answerLanguage?: string } = {},
+  options: { env?: Env; fetcher?: typeof fetch; answerLanguage?: string; totalMs?: number; hedgeMs?: number; minCallMs?: number; retryDelayMs?: number } = {},
 ): Promise<AiAnswer> {
   const env = options.env ?? process.env;
   const fetcher = options.fetcher ?? fetch;
+  const totalMs = options.totalMs ?? AI_TOTAL_MS;
+  const hedgeMs = options.hedgeMs ?? AI_HEDGE_MS;
+  const minCallMs = options.minCallMs ?? MIN_CALL_MS;
+  const retryDelayMs = options.retryDelayMs ?? RETRY_DELAY_MS;
+  const started = Date.now();
   const modelId = aiModelOf(preferred);
   const pickedProvider = modelId ? AI_MODELS.find((model) => model.id === modelId)?.provider : undefined;
   const providerPref = pickedProvider && pickedProvider !== "gemini" ? pickedProvider : aiProviderOf(preferred);
@@ -570,22 +791,103 @@ export async function runAiAnswer(
     seen.add(key);
     queue.push(config);
   };
-  if (modelId) push(configForModel(modelId, env));
-  for (const id of order) push(readProviderConfig(id, env));
-  if (!queue.length) return { status: "unconfigured", message: AI_MESSAGES.unconfigured };
-  if (!context.length) return { status: "no-context", message: AI_MESSAGES.noContext };
-
-  const failed: AnswerProviderId[] = [];
-  for (const config of queue) {
-    try {
-      const answer = await askProvider(config, query, context, fetcher, options.answerLanguage);
-      const requested = pickedProvider ?? providerPref;
-      return { status: "ok", ...answer, provider: config.id, ...(requested ? { requested } : {}), failed };
-    } catch (error) {
-      const reason = error instanceof Error ? error.message.slice(0, 40) : "unknown";
-      console.error(`[ai] ${config.id} ${config.model} failed (${reason})`);
-      if (!failed.includes(config.id)) failed.push(config.id);
+  const before: AiAttempt[] = [];
+  const pickedSpec = modelId ? AI_MODELS.find((model) => model.id === modelId) : undefined;
+  if (pickedSpec) {
+    const config = configForModel(pickedSpec.id, env);
+    if (config) push(config);
+    else {
+      // The pick can't be called right now. Say so instead of quietly answering with another model.
+      const blocked = planBlockFor(pickedSpec.gateway);
+      before.push(
+        blocked
+          ? { ...blocked, detail: sanitizeDetail(`refused earlier on this server${blocked.detail ? `: ${blocked.detail}` : ""}`) }
+          : {
+              provider: pickedSpec.provider,
+              model: pickedSpec.id,
+              kind: "unavailable",
+              detail: modelNote(pickedSpec, aiKeyFlags(env), planBlockedModels()) ?? "not set up on this server",
+            },
+      );
     }
   }
-  return { status: "error", message: AI_MESSAGES.error, failed };
+  for (const id of order) push(readProviderConfig(id, env));
+  const picked = pickedSpec ? { picked: pickedSpec.id } : {};
+  if (!queue.length) return { status: "unconfigured", message: AI_MESSAGES.unconfigured, ...picked };
+  if (!context.length) return { status: "no-context", message: AI_MESSAGES.noContext, ...picked };
+
+  const remaining = () => totalMs - (Date.now() - started);
+  /** Try each model in turn until one answers; failures go into `log`. */
+  const chain = async (configs: ProviderConfig[], log: AiAttempt[], stop?: AbortSignal): Promise<Answered | null> => {
+    for (const config of configs) {
+      if (stop?.aborted) return null;
+      const left = remaining();
+      if (left < minCallMs) {
+        log.push({ provider: config.id, model: config.model, kind: "timeout", detail: "not tried: out of time" });
+        continue;
+      }
+      let retried = false;
+      for (;;) {
+        const timeoutMs = Math.min(timeoutFor(config), remaining());
+        try {
+          const answer = await askProvider(config, query, context, fetcher, options.answerLanguage, { timeoutMs, signal: stop });
+          return { ...answer, config };
+        } catch (error) {
+          if (stop?.aborted) return null;
+          const attempt = attemptFrom(config, error, timeoutMs);
+          // A 5xx is often a passing provider hiccup: try the same model once more if there's time.
+          if (!retried && isRetryable(attempt) && remaining() >= minCallMs + retryDelayMs) {
+            retried = true;
+            console.error(`${attemptLogLine(attempt)} (retrying once)`);
+            await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+            if (stop?.aborted) return null;
+            continue;
+          }
+          if (retried) attempt.detail = sanitizeDetail(`${attempt.detail ? `${attempt.detail} ` : ""}(failed twice)`);
+          console.error(attemptLogLine(attempt));
+          log.push(attempt);
+          break;
+        }
+      }
+    }
+    return null;
+  };
+
+  const [first, ...rest] = queue as [ProviderConfig, ...ProviderConfig[]];
+  const firstLog: AiAttempt[] = [];
+  const restLog: AiAttempt[] = [];
+  const firstRun = chain([first], firstLog);
+  let winner: Answered | null;
+  if (rest.length && timeoutFor(first) > hedgeMs) {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const hedge = new Promise<"hedge">((resolve) => {
+      timer = setTimeout(() => resolve("hedge"), hedgeMs);
+    });
+    const early = await Promise.race([firstRun, hedge]);
+    clearTimeout(timer);
+    if (early !== "hedge") {
+      winner = early ?? (await chain(rest, restLog));
+    } else {
+      // The pick is still thinking: start the fallback now, but prefer the pick if it answers in time.
+      const stopRest = new AbortController();
+      const restRun = chain(rest, restLog, stopRest.signal);
+      winner = await firstRun;
+      if (winner) {
+        stopRest.abort();
+        restLog.length = 0;
+      } else {
+        winner = await restRun;
+      }
+    }
+  } else {
+    winner = (await firstRun) ?? (await chain(rest, restLog));
+  }
+
+  const attempts = [...before, ...firstLog, ...restLog];
+  const failed: AnswerProviderId[] = [];
+  for (const attempt of attempts) if (!failed.includes(attempt.provider)) failed.push(attempt.provider);
+  if (!winner) return { status: "error", message: AI_MESSAGES.error, failed, ...picked, attempts };
+  const { config, ...answer } = winner;
+  const requested = pickedProvider ?? providerPref;
+  return { status: "ok", ...answer, provider: config.id, ...(requested ? { requested } : {}), failed, ...picked, attempts };
 }
