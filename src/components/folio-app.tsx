@@ -1008,28 +1008,22 @@ function Results({
                       <Fragment key={hit.id}>
                         <li className={`border-b border-line ${hit.id === openId ? "bg-accent-soft" : ""}`}>
                           <div className="flex items-start gap-1">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                tap("light");
-                                setOpenId(hit.id);
-                              }}
-                              aria-pressed={hit.id === openId}
-                              className="group min-w-0 flex-1 px-1 py-4 text-start"
-                            >
+                            <div className="min-w-0 flex-1 select-text px-1 py-4">
                               <p className="flex items-center gap-2 text-xs tracking-wide text-muted uppercase">
                                 <SiteLogo url={hit.url} />
                                 <span className="min-w-0 truncate">{hit.meta}</span>
                               </p>
-                              <p dir="auto" className="mt-1 font-display text-xl leading-snug text-ink group-hover:text-accent">
-                                <Highlight text={hit.title} query={query} />
-                              </p>
+                              <ResultTitle hit={hit} query={query} open={hit.id === openId} onOpen={() => {
+                                tap("light");
+                                setOpenId(hit.id);
+                              }} />
+                              <p dir="ltr" className="mt-1 break-all text-xs text-muted">{hit.url}</p>
                               {hit.snippet ? (
                                 <p dir="auto" className="mt-1 line-clamp-2 text-sm leading-relaxed text-muted">
                                   <Highlight text={hit.snippet} query={query} />
                                 </p>
                               ) : null}
-                            </button>
+                            </div>
                             <a
                               href={hit.url}
                               target="_blank"
@@ -1450,6 +1444,41 @@ function AiText({
         );
       })}
     </>
+  );
+}
+
+/** Keep title activation separate from dragging or extending a text selection. */
+function ResultTitle({ hit, query, open, onOpen }: {
+  hit: SearchHit;
+  query: string;
+  open: boolean;
+  onOpen: () => void;
+}) {
+  const pointer = useRef<{ x: number; y: number; dragged: boolean } | null>(null);
+  return (
+    <button
+      type="button"
+      draggable={false}
+      aria-pressed={open}
+      onPointerDown={(event) => {
+        pointer.current = { x: event.clientX, y: event.clientY, dragged: false };
+      }}
+      onPointerMove={(event) => {
+        const start = pointer.current;
+        if (start && Math.hypot(event.clientX - start.x, event.clientY - start.y) > 4) start.dragged = true;
+      }}
+      onPointerCancel={() => { pointer.current = null; }}
+      onClick={(event) => {
+        if (event.detail > 0 && (pointer.current?.dragged || event.detail > 1 || window.getSelection()?.isCollapsed === false)) {
+          event.preventDefault();
+          return;
+        }
+        onOpen();
+      }}
+      className="mt-1 block w-full select-text text-start font-display text-xl leading-snug text-ink hover:text-accent focus-visible:outline-2 focus-visible:outline-accent"
+    >
+      <span dir="auto"><Highlight text={hit.title} query={query} /></span>
+    </button>
   );
 }
 
