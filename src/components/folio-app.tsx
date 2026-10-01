@@ -1083,7 +1083,7 @@ function Results({
                           <div className="flex items-start gap-1">
                             {/* Plain text, not a button: browsers will not start a text selection inside a button.
                                 The title link opens the preview on a plain click; a drag or selection never does. */}
-                            <div className="min-w-0 flex-1 px-1 py-4 text-start">
+                            <div className="min-w-0 flex-1 select-text px-1 py-4 text-start">
                               <p className="flex items-center gap-2 text-xs tracking-wide text-muted uppercase">
                                 <SiteLogo url={hit.url} />
                                 <span className="min-w-0 truncate">{hit.meta}</span>
@@ -1102,6 +1102,7 @@ function Results({
                                   <Highlight text={hit.title} query={query} />
                                 </SelectableLink>
                               </p>
+                              <p dir="ltr" className="mt-1 break-all text-xs text-muted">{hit.url}</p>
                               {hit.snippet ? (
                                 <p dir="auto" className="mt-1 line-clamp-2 text-sm leading-relaxed text-muted">
                                   <Highlight text={hit.snippet} query={query} />
