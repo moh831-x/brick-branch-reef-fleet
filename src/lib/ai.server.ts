@@ -121,8 +121,8 @@ const RETRY_DELAY_MS = 500;
 function isRetryable(attempt: AiAttempt): boolean {
   return attempt.kind === "server" && attempt.status !== undefined && attempt.status !== 504;
 }
-/** Room for a few sentences plus any reasoning tokens the model spends first. */
-const MAX_OUTPUT_TOKENS = 1200;
+/** Room for a detailed answer plus any reasoning tokens the model spends first. */
+const MAX_OUTPUT_TOKENS = 2200;
 /** Extra room for the hidden reasoning tokens a reasoning model spends before it writes. */
 const REASONING_TOKENS = 3000;
 /** OpenAI-compatible endpoint. One key covers ChatGPT and Claude when they have no key of their own. */

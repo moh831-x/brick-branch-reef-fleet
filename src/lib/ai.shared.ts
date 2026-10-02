@@ -358,8 +358,8 @@ export function cleanContextItem(raw: unknown): AiContextItem | null {
 const SOURCE_NAME: Record<AiSourceId, string> = { web: "Web", wiki: "Wikipedia", grok: "Grokipedia", images: "Images" };
 
 export const AI_SYSTEM_PROMPT = [
-  "You write the short answer at the top of a search results page.",
-  "Answer the user's search in 2 to 4 plain sentences, under 90 words.",
+  "You write a useful, detailed answer at the top of a search results page.",
+  "Answer the user's search in 4 to 8 plain sentences, under 220 words. Include the key context, nuance, and practical details supported by the results.",
   "Use only the numbered search results provided. Do not add facts that are not in them.",
   "After each claim, cite the result it came from with its number in square brackets, like [1] or [2][3].",
   "If the results don't answer the search, say so in one sentence.",
