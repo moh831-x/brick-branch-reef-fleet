@@ -16,6 +16,7 @@ import {
   AI_MODELS,
   AI_PROVIDERS,
   AI_SYSTEM_PROMPT,
+  AI_QUESTION_PROMPT,
   aiModelOf,
   aiProviderOf,
   aiProviderOrder,
@@ -270,7 +271,8 @@ export function buildProviderRequest(
   const graphNote = graph
     ? " A graph of this search is already drawn in the answer. Describe that function in plain language. Do not say the results do not answer the search. Cite a numbered result only when it is about the same function."
     : "";
-  const system = `${language ? `${AI_SYSTEM_PROMPT} Write the entire answer in ${language}, even when the results are in another language.` : AI_SYSTEM_PROMPT}${graphNote}`;
+  const basePrompt = context.length ? AI_SYSTEM_PROMPT : AI_QUESTION_PROMPT;
+  const system = `${language ? `${basePrompt} Write the entire answer in ${language}, even when the results are in another language.` : basePrompt}${graphNote}`;
   const prompt = buildAiPrompt(query, context, language, graph);
   if (config.api === "anthropic") {
     return {
@@ -836,7 +838,6 @@ export async function runAiAnswer(
   for (const id of order) push(readProviderConfig(id, env));
   const picked = pickedSpec ? { picked: pickedSpec.id } : {};
   if (!queue.length) return { status: "unconfigured", message: AI_MESSAGES.unconfigured, ...picked };
-  if (!context.length && !graph) return { status: "no-context", message: AI_MESSAGES.noContext, ...picked };
 
   const remaining = () => totalMs - (Date.now() - started);
   /** Try each model in turn until one answers; failures go into `log`. */

@@ -38,9 +38,9 @@ import {
 } from "@/lib/ai.shared";
 import { SiteFooter } from "@/components/site-footer";
 import { fill, sourceLabel, type UiCopy } from "@/lib/ui-copy";
+import { questionCopy } from "@/lib/question-copy";
 import { AnswerImage } from "@/components/answer-image";
 import { GraphCard } from "@/components/graph-card";
-import { parseGraphQuery } from "@/lib/graph";
 import { langDir, langInfo, PREVIEW_TRANSLATE_CHARS, type UiLang } from "@/lib/i18n";
 import { clickAction, factsOf, trackPresses } from "@/lib/select-click";
 import { useLang } from "@/lib/lang-context";
@@ -315,7 +315,7 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
 
   function go(value: string, nextSources = sources) {
     const q = value.trim();
-    if (!q || (!nextSources.web && !nextSources.wiki && !nextSources.grok && !nextSources.images)) return;
+    if (!q) return;
     tap("medium");
     remember(q);
     setOpen(false);
@@ -496,7 +496,7 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
         />
         <button
           type="submit"
-          disabled={!draft.trim() || !anySource}
+          disabled={!draft.trim()}
           aria-label={copy.search}
           className="inline-flex size-11 shrink-0 items-center justify-center rounded-full bg-ink text-bg transition-transform duration-150 ease-out active:scale-[0.96] disabled:opacity-40"
         >
@@ -657,7 +657,7 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
           </p>
           {!anySource ? (
             <div className="mt-4 w-full max-w-xl">
-              <p className="mb-2 text-sm text-accent">{copy.sourcesOff}</p>
+              <p className="mb-2 text-sm text-accent">{questionCopy(uiLang).noSources}</p>
               {sourcePills}
             </div>
           ) : null}
@@ -1030,7 +1030,7 @@ function Results({
         </div>
         <div className="flex items-center gap-2">
           <p className="text-sm text-muted tabular-nums" aria-live="polite">
-            {enabled} · {formatTook(data.tookMs)}
+            {blocks.length ? `${enabled} · ${formatTook(data.tookMs)}` : copy.aiAnswer}
           </p>
           <NativeShareButton
             title={`${query} — Folio`}
@@ -1041,11 +1041,11 @@ function Results({
         </div>
       </div>
 
-      {aiCard ? <div className="mb-8 lg:me-[22.5rem]">{aiCard}</div> : null}
+      {aiCard ? <div className={blocks.length ? "mb-8 lg:me-[22.5rem]" : "mb-8 max-w-3xl"}>{aiCard}</div> : null}
 
       <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-10 lg:grid-cols-[minmax(0,1fr)_20rem]">
         <div className="order-2 grid gap-10 lg:order-1">
-          {!anyHits && !loading ? (
+          {!anyHits && !loading && blocks.length > 0 ? (
             <p className="text-muted">{copy.nothing}</p>
           ) : null}
           {visible.map((block) => {
@@ -1275,10 +1275,6 @@ function AiAnswerCard({
       grok: sources.grok ? data.grok : undefined,
       images: sources.images ? data.images : undefined,
     });
-    if (!context.length && !parseGraphQuery(normalized)) {
-      setState({ key, answer: { status: "no-context", message: AI_MESSAGES.noContext } });
-      return;
-    }
     setState({ key, answer: null });
     answerWithAi({ data: { q: data.query, context, model: selected, lang } })
       .then((answer) => setState((current) => (current?.key === key ? { key, answer } : current)))
@@ -1291,6 +1287,11 @@ function AiAnswerCard({
   }, [key, ready, attempt]);
 
   const answer = state?.key === key ? state.answer : null;
+  const hasReferences = Boolean(
+    (sources.web && data?.web.results.length) || (sources.wiki && data?.wiki.results.length) ||
+    (sources.grok && data?.grok.results.length) || (sources.images && data?.images.results.length),
+  );
+  const question = questionCopy(lang);
   const pending = !answer;
   // After a few seconds, say how long the pick may take (slow reasoning models wait up to 40 s).
   const [slow, setSlow] = useState(false);
@@ -1321,7 +1322,7 @@ function AiAnswerCard({
         {pending ? (
           <div className="mt-3">
             <p className="text-sm text-muted">
-              {selected ? fill(copy.asking, { model: modelLabel(selected) }) : copy.writing}
+              {selected ? fill(hasReferences ? copy.asking : question.asking, { model: modelLabel(selected) }) : (hasReferences ? copy.writing : question.writing)}
             </p>
             {slow && selected ? (
               <p className="mt-1 text-xs text-muted">
@@ -1377,7 +1378,7 @@ function AiAnswerCard({
                   </span>{" "}
                 </>
               ) : null}
-              <span>{fill(copy.writtenBy, { provider: aiProviderLabel(answer.provider), model: answer.model })}</span>
+              <span>{fill(hasReferences ? copy.writtenBy : question.writtenBy, { provider: aiProviderLabel(answer.provider), model: answer.model })}</span>
             </p>
             {answer.attempts && answer.attempts.length > 0 ? <AiAttemptDetails attempts={answer.attempts} copy={copy} /> : null}
           </>
