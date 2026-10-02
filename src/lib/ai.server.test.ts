@@ -544,3 +544,25 @@ describe("Meta Model API", () => {
     assert.deepEqual(fallback.status === "ok" ? fallback.failed : [], ["meta"]);
   });
 });
+
+describe("direct questions without references", () => {
+  it("answers with no search results and no fabricated citations", async () => {
+    const { fetcher, calls } = fakeFetch();
+    const answer = await runAiAnswer("3 * 9", [], "meta", { env: { MODEL_API_KEY: "m" }, fetcher, answerLanguage: "Bangla" });
+    assert.ok(answer.status === "ok");
+    assert.equal(calls.length, 1);
+    const messages = calls[0].body.messages as { role: string; content: string }[];
+    assert.match(messages[0].content, /question directly/);
+    assert.match(messages[0].content, /Do not invent citations/);
+    assert.match(messages[0].content, /Bangla/);
+    assert.doesNotMatch(messages[0].content, /Use only the numbered search results/);
+    assert.deepEqual(answer.citations, []);
+    assert.doesNotMatch(answer.text, /\[1\]/);
+  });
+  it("retains search grounding when references are present", () => {
+    const config = readProviderConfig("grok", ALL)!;
+    const request = buildProviderRequest(config, "dogs", context);
+    const sent = body(request.init);
+    assert.match((sent.messages as { content: string }[])[0].content, /Use only the numbered search results/);
+  });
+});

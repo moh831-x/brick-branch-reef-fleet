@@ -30,12 +30,11 @@ function HowToSearchPage() {
           Four switches choose the sources: Web, Wikipedia, Grokipedia, and Images. Web, Wikipedia, and
           Grokipedia start on. Images starts off. Wikipedia, Grokipedia, and Images are marked optional.
           After you search, the switches sit with the search box. On the home page they stay hidden until every source is off. Then they
-          appear under the message “Turn on Web, Wikipedia, Grokipedia, or Images to search.”
+          appear under a message explaining that you can ask a question directly or turn on a source for references.
         </p>
         <p>
           Turning a switch off removes that source from the search. This browser stores the choice. If Web,
-          Wikipedia, Grokipedia, and Images are all off, Folio does not fetch results, and the search button will not
-          submit. Turn at least one source back on. If you are already on a results page and you switch the last
+          Wikipedia, Grokipedia, and Images are all off, Folio does not fetch search results, but you can still submit a question for a direct AI answer. If you are already on a results page and you switch the last
           source off, those source lists are no longer shown.
         </p>
         <p>
