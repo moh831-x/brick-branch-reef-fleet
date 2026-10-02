@@ -229,7 +229,7 @@ describe("GPT-6 Astra and Claude through the AI Gateway", () => {
     assert.equal(sent.reasoning_effort, undefined);
     assert.equal(sent.temperature, undefined);
     // The gateway documents max_tokens; reasoning tokens need room on top of the answer.
-    assert.equal(sent.max_tokens, 4200);
+    assert.equal(sent.max_tokens, 5200);
     assert.equal(sent.max_completion_tokens, undefined);
     assert.equal(sent.stream, false);
 
@@ -242,7 +242,7 @@ describe("GPT-6 Astra and Claude through the AI Gateway", () => {
       const claude = body(buildProviderRequest(config, "dogs", context).init);
       assert.equal(claude.model, model);
       assert.equal(claude.reasoning, undefined);
-      assert.equal(claude.max_tokens, 1200);
+      assert.equal(claude.max_tokens, 2200);
       assert.equal(claude.max_completion_tokens, undefined);
       assert.equal(claude.temperature, undefined);
     }
@@ -254,7 +254,7 @@ describe("GPT-6 Astra and Claude through the AI Gateway", () => {
     const sent = body(buildProviderRequest(astra, "dogs", context).init);
     assert.equal(sent.model, "gpt-6-astra");
     assert.equal(sent.reasoning_effort, "low");
-    assert.equal(sent.max_completion_tokens, 4200);
+    assert.equal(sent.max_completion_tokens, 5200);
     assert.equal(sent.max_tokens, undefined);
     assert.equal(sent.temperature, undefined);
     const haiku = configForModel("claude-haiku-4.5", { ANTHROPIC_API_KEY: "a" });
@@ -394,12 +394,12 @@ describe("slow models: timeouts, low effort, and an early fallback", () => {
     const sent = body(buildProviderRequest(grok, "dogs", context).init);
     assert.equal(sent.model, "grok-4.7");
     assert.equal(sent.reasoning_effort, "low");
-    assert.equal(sent.max_completion_tokens, 4200);
+    assert.equal(sent.max_completion_tokens, 5200);
     assert.equal(sent.max_tokens, undefined);
     assert.equal(sent.temperature, undefined);
     const plain = body(buildProviderRequest(configForModel("grok-4.3", env)!, "dogs", context).init);
     assert.equal(plain.reasoning_effort, undefined);
-    assert.equal(plain.max_tokens, 1200);
+    assert.equal(plain.max_tokens, 2200);
   });
 
   const reply = (model: string) => Response.json({ model, choices: [{ message: { content: `${model} [1].` } }] });
@@ -470,7 +470,7 @@ describe("Claude through the AI Gateway: minimal, valid requests", () => {
     assert.deepEqual(Object.keys(sent).sort(), ["max_tokens", "messages", "model", "stream"]);
     assert.deepEqual((sent.messages as Array<{ role: string; content: string }>).map((m) => m.role), ["system", "user"]);
     assert.ok((sent.messages as Array<{ content: string }>).every((m) => m.content.trim().length > 0));
-    assert.equal(sent.max_tokens, 1200);
+    assert.equal(sent.max_tokens, 2200);
     // Own Anthropic key: the effort setting still applies there.
     assert.equal(readProviderConfig("claude", { ANTHROPIC_API_KEY: "a", ANTHROPIC_EFFORT: "low" })?.effort, "low");
     // Same for OpenAI: GPT-4.1 mini on the gateway gets no reasoning field.
@@ -478,11 +478,11 @@ describe("Claude through the AI Gateway: minimal, valid requests", () => {
   });
 
   it("never asks for more output than the model allows", () => {
-    assert.equal(outputBudget({ model: "anthropic/claude-3-haiku" }), 1200);
+    assert.equal(outputBudget({ model: "anthropic/claude-3-haiku" }), 2200);
     assert.equal(outputBudget({ model: "claude-3-haiku-20240307", effort: "low" }), 4096);
-    assert.equal(outputBudget({ model: "claude-3-5-haiku-latest", effort: "low" }), 4200);
-    assert.equal(outputBudget({ model: "openai/gpt-6-astra", effort: "low" }), 4200);
-    assert.equal(outputBudget({ model: "anthropic/claude-sonnet-5.5" }), 1200);
+    assert.equal(outputBudget({ model: "claude-3-5-haiku-latest", effort: "low" }), 5200);
+    assert.equal(outputBudget({ model: "openai/gpt-6-astra", effort: "low" }), 5200);
+    assert.equal(outputBudget({ model: "anthropic/claude-sonnet-5.5" }), 2200);
   });
 
   it("retries a 5xx once on the same model before falling back", async () => {

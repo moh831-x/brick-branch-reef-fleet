@@ -38,6 +38,7 @@ import {
 } from "@/lib/ai.shared";
 import { SiteFooter } from "@/components/site-footer";
 import { fill, sourceLabel, type UiCopy } from "@/lib/ui-copy";
+import { AnswerImage } from "@/components/answer-image";
 import { GraphCard } from "@/components/graph-card";
 import { parseGraphQuery } from "@/lib/graph";
 import { langDir, langInfo, PREVIEW_TRANSLATE_CHARS, type UiLang } from "@/lib/i18n";
@@ -1401,6 +1402,7 @@ function AiAnswerCard({
           </>
         )}
       </div>
+      <AnswerImage key={normalized} query={query} answer={answer?.status === "ok" ? answer.text : undefined} lang={lang} />
     </section>
   );
 }
