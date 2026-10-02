@@ -57,6 +57,17 @@ type ProviderSpec = {
  * Anthropic claude-sonnet-5-5 (https://docs.anthropic.com/en/docs/about-claude/models/overview).
  */
 export const AI_PROVIDER_SPECS: Record<AiProviderId, ProviderSpec> = {
+  meta: {
+    id: "meta",
+    api: "chat",
+    keyVar: "MODEL_API_KEY",
+    modelVar: "META_MODEL",
+    baseVar: "META_BASE_URL",
+    defaultBase: "https://api.meta.ai/v1",
+    defaultModel: "muse-spark-1.3",
+    defaultEffort: "low",
+    effortVar: "META_REASONING_EFFORT",
+  },
   grok: {
     id: "grok",
     api: "chat",
@@ -139,11 +150,11 @@ export type ProviderConfig = {
 export function readProviderConfig(id: AiProviderId, env: Env = process.env): ProviderConfig | null {
   const spec = AI_PROVIDER_SPECS[id];
   const ownKey = env[spec.keyVar]?.trim();
-  const gatewayKey = id === "grok" ? "" : env.AI_GATEWAY_API_KEY?.trim() || "";
+  const gatewayKey = id === "grok" || id === "meta" ? "" : env.AI_GATEWAY_API_KEY?.trim() || "";
   if (!ownKey && !gatewayKey) return null;
   const viaGateway = !ownKey;
   const model =
-    env[spec.modelVar]?.trim() || (viaGateway && id !== "grok" ? AI_GATEWAY_MODELS[id] : spec.defaultModel);
+    env[spec.modelVar]?.trim() || (viaGateway && (id === "openai" || id === "claude") ? AI_GATEWAY_MODELS[id] : spec.defaultModel);
   // Effort only goes to the provider's own API. Through the gateway it would become a `reasoning`
   // object, which non-reasoning defaults (GPT-4.1 mini, Claude Haiku 4.5) don't take.
   const effort = viaGateway
@@ -211,6 +222,7 @@ export function aiProviderStatus(env: Env = process.env): AiProviderStatus[] {
 
 export function aiKeyFlags(env: Env = process.env): AiKeyFlags {
   return {
+    meta: Boolean(env.MODEL_API_KEY?.trim()),
     grok: Boolean(env.XAI_API_KEY?.trim()),
     openai: Boolean(env.OPENAI_API_KEY?.trim()),
     claude: Boolean(env.ANTHROPIC_API_KEY?.trim()),
@@ -272,7 +284,7 @@ export function buildProviderRequest(config: ProviderConfig, query: string, cont
       },
     };
   }
-  const openai = config.id === "openai" || config.gateway === true;
+  const openai = config.id === "openai" || config.id === "meta" || config.gateway === true;
   return {
     url: `${config.baseUrl}/chat/completions`,
     init: {

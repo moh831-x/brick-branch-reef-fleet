@@ -7,18 +7,20 @@
 export type AiSourceId = "web" | "wiki" | "grok" | "images";
 
 /** The AI providers Folio can ask, in fallback order. The id is what goes in the address (`ai_model=`). */
-export type AiProviderId = "grok" | "openai" | "claude";
+export type AiProviderId = "meta" | "grok" | "openai" | "claude";
 
 /** Gemini is gateway-only and is not part of the provider fallback order. */
 export type AnswerProviderId = AiProviderId | "gemini";
 
 export const AI_PROVIDERS: ReadonlyArray<{ id: AiProviderId; label: string; company: string }> = [
+  { id: "meta", label: "Muse Spark", company: "Meta" },
   { id: "grok", label: "Grok", company: "xAI" },
   { id: "openai", label: "ChatGPT", company: "OpenAI" },
   { id: "claude", label: "Claude", company: "Anthropic" },
 ];
 
 const ANSWER_LABEL: Record<AnswerProviderId, string> = {
+  meta: "Muse Spark",
   grok: "Grok",
   openai: "ChatGPT",
   claude: "Claude",
@@ -37,7 +39,7 @@ export function aiProviderLabel(id: AnswerProviderId): string {
 
 /**
  * Which providers to try, in order: the one the reader picked (when it is set up), then every other
- * set-up provider in the order Grok, ChatGPT, Claude.
+ * set-up provider in the order Muse Spark, Grok, ChatGPT, Claude.
  */
 export function aiProviderOrder(preferred: AiProviderId | undefined, available: readonly AiProviderId[]): AiProviderId[] {
   const ordered = AI_PROVIDERS.map((provider) => provider.id).filter((id) => available.includes(id));
@@ -75,6 +77,7 @@ export const AI_DEFAULT_TIMEOUT_MS = 20_000;
 const SLOW_MS = 40_000;
 
 export const AI_MODELS: readonly AiModelSpec[] = [
+  { id: "muse-spark-1.3", label: "Muse Spark 1.3", provider: "meta", direct: "muse-spark-1.3", effort: "low", timeoutMs: SLOW_MS },
   // Grok 4.7 and 4.6 always reason (it can't be turned off) and default to high effort; low keeps
   // a short cited answer quick. https://docs.x.ai (reasoning_effort: low | medium | high | xhigh).
   { id: "grok-4.7", label: "Grok 4.7", provider: "grok", direct: "grok-4.7", effort: "low", timeoutMs: SLOW_MS },
@@ -103,12 +106,13 @@ export const AI_MODELS: readonly AiModelSpec[] = [
 ];
 
 const DEFAULT_MODEL: Record<AiProviderId, string> = {
+  meta: "muse-spark-1.3",
   grok: "grok-4.3",
   openai: "gpt-4.1-mini",
   claude: "claude-sonnet-5.5",
 };
 
-export type AiKeyFlags = { grok: boolean; openai: boolean; claude: boolean; gateway: boolean };
+export type AiKeyFlags = { meta: boolean; grok: boolean; openai: boolean; claude: boolean; gateway: boolean };
 
 export function aiModelOf(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
@@ -124,7 +128,7 @@ export function aiChoiceOf(value: unknown): string | undefined {
 /** True when this model would be called through the AI Gateway (no key of its provider's own). */
 function viaGateway(spec: AiModelSpec, keys: AiKeyFlags): boolean {
   if (spec.provider === "gemini") return true;
-  if (spec.provider === "grok") return false;
+  if (spec.provider === "grok" || spec.provider === "meta") return false;
   return !(spec.provider === "openai" ? keys.openai : keys.claude);
 }
 
@@ -133,6 +137,7 @@ function viaGateway(spec: AiModelSpec, keys: AiKeyFlags): boolean {
  * (the server learns that from a real refusal; see ai.server.ts). They stay listed but cannot be picked.
  */
 export function modelReady(spec: AiModelSpec, keys: AiKeyFlags, planBlocked: ReadonlySet<string> = new Set()): boolean {
+  if (spec.provider === "meta") return keys.meta && Boolean(spec.direct);
   if (spec.provider === "grok") return keys.grok && Boolean(spec.direct);
   if (!viaGateway(spec, keys)) return Boolean(spec.direct);
   return keys.gateway && Boolean(spec.gateway) && !planBlocked.has(spec.id);

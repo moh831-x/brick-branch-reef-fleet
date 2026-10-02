@@ -45,7 +45,7 @@ function fakeFetch(fail: string[] = []) {
   const fetcher = (async (url: string | URL, init?: RequestInit) => {
     const href = String(url);
     calls.push({ url: href, body: body(init ?? {}) });
-    const provider = href.includes("x.ai") ? "grok" : href.includes("openai") ? "openai" : "claude";
+    const provider = href.includes("meta.ai") ? "meta" : href.includes("x.ai") ? "grok" : href.includes("openai") ? "openai" : "claude";
     if (fail.includes(provider)) return new Response("nope", { status: 500 });
     const text = `${provider} says hi [1].`;
     const payload =
@@ -111,6 +111,7 @@ describe("provider config", () => {
     assert.deepEqual(
       status.map((row) => [row.id, row.available]),
       [
+        ["meta", false],
         ["grok", false],
         ["openai", true],
         ["claude", false],
@@ -510,5 +511,36 @@ describe("Claude through the AI Gateway: minimal, valid requests", () => {
     const answer = await runAiAnswer("dogs", context, "claude-haiku-4.5", { env: { XAI_API_KEY: "x", AI_GATEWAY_API_KEY: "g" }, fetcher, retryDelayMs: 0 });
     assert.ok(answer.status === "ok");
     assert.deepEqual(models, ["anthropic/claude-haiku-4.5", "grok-4.3"]);
+  });
+});
+
+describe("Meta Model API", () => {
+  it("requires its own key and builds the documented Muse Spark request", () => {
+    assert.equal(readProviderConfig("meta", { AI_GATEWAY_API_KEY: "gateway" }), null);
+    const config = configForModel("muse-spark-1.3", { MODEL_API_KEY: "meta-test-key" })!;
+    const request = buildProviderRequest(config, "dogs", context);
+    assert.equal(request.url, "https://api.meta.ai/v1/chat/completions");
+    assert.equal(headers(request.init).Authorization, "Bearer meta-test-key");
+    const sent = body(request.init);
+    assert.equal(sent.model, "muse-spark-1.3");
+    assert.equal(sent.reasoning_effort, "low");
+    assert.equal(sent.max_completion_tokens, outputBudget(config));
+    assert.equal(sent.temperature, undefined);
+    assert.ok(!JSON.stringify(aiModelStatus({ MODEL_API_KEY: "meta-test-key" })).includes("meta-test-key"));
+  });
+
+  it("uses Meta by default, preserves choices, and falls back after a failure", async () => {
+    const env = { ...ALL, MODEL_API_KEY: "meta-test-key" };
+    const first = fakeFetch();
+    const answer = await runAiAnswer("dogs", context, undefined, { env, fetcher: first.fetcher });
+    assert.ok(answer.status === "ok" && answer.provider === "meta");
+    assert.equal(first.calls.length, 1);
+    const chosen = fakeFetch();
+    const explicit = await runAiAnswer("dogs", context, "grok-4.3", { env, fetcher: chosen.fetcher });
+    assert.ok(explicit.status === "ok" && explicit.provider === "grok");
+    const failing = fakeFetch(["meta"]);
+    const fallback = await runAiAnswer("dogs", context, undefined, { env, fetcher: failing.fetcher, retryDelayMs: 0 });
+    assert.ok(fallback.status === "ok" && fallback.provider === "grok");
+    assert.deepEqual(fallback.status === "ok" ? fallback.failed : [], ["meta"]);
   });
 });
