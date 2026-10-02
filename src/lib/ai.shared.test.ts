@@ -82,7 +82,7 @@ describe("AI providers", () => {
   });
 
   it("keeps a model the reader can run, and maps an old provider id to that provider's default", () => {
-    const keys: AiKeyFlags = { grok: true, openai: false, claude: false, gateway: true };
+    const keys: AiKeyFlags = { meta: false, grok: true, openai: false, claude: false, gateway: true };
     assert.equal(modelReady({ id: "grok-4.7", label: "Grok 4.7", provider: "grok", direct: "grok-4.7" }, keys), true);
     const sonnet = { id: "claude-sonnet-5.5", label: "Claude", provider: "claude", direct: "claude-sonnet-5-5", gateway: "anthropic/claude-sonnet-5.5" } as const;
     // Through the gateway it can be picked until the gateway refuses it for the plan.
@@ -92,7 +92,7 @@ describe("AI providers", () => {
     assert.equal(modelNote(sonnet, keys, new Set(["claude-sonnet-5.5"])), "needs a paid plan");
     // With Anthropic's own key the plan does not matter.
     assert.equal(modelReady(sonnet, { ...keys, claude: true }, new Set(["claude-sonnet-5.5"])), true);
-    assert.equal(modelNote(sonnet, { grok: true, openai: false, claude: false, gateway: false }), "not set up");
+    assert.equal(modelNote(sonnet, { meta: false, grok: true, openai: false, claude: false, gateway: false }), "not set up");
     assert.equal(selectedAiModel("grok-4.7", ["grok-4.3", "grok-4.7", "gpt-4.1-mini"]), "grok-4.7");
     assert.equal(selectedAiModel("openai", ["grok-4.3", "gpt-4.1-mini", "gpt-4o-mini"]), "gpt-4.1-mini");
     assert.equal(selectedAiModel(undefined, ["gpt-4o-mini", "grok-4.3"]), "grok-4.3");
@@ -210,5 +210,17 @@ describe("fallback note", () => {
     });
     assert.deepEqual(fallbackFailures(answer), ["Claude Sonnet 5.5", "anthropic/claude-3-haiku"]);
     assert.equal(aiModelLabelFor("openai/gpt-6-astra"), "GPT-6 Astra");
+  });
+});
+
+ describe("Muse Spark default", () => {
+  it("defaults to Muse Spark while preserving an explicit choice", () => {
+    assert.equal(selectedAiModel(undefined, ["grok-4.3", "muse-spark-1.3"]), "muse-spark-1.3");
+    assert.equal(selectedAiModel("grok-4.3", ["grok-4.3", "muse-spark-1.3"]), "grok-4.3");
+    assert.equal(selectedAiProvider(undefined, ["grok", "meta"]), "meta");
+    const muse = AI_MODELS.find(model => model.id === "muse-spark-1.3")!;
+    const keys = { meta: false, grok: true, openai: false, claude: false, gateway: true };
+    assert.equal(modelReady(muse, keys), false);
+    assert.equal(modelReady(muse, { ...keys, meta: true }), true);
   });
 });
