@@ -57,14 +57,31 @@ export type AiModelSpec = {
   provider: AnswerProviderId;
   direct?: string;
   gateway?: string;
-  /** Free AI Gateway plans reject this model. A provider's own key can still use `direct`. */
-  paidGateway?: boolean;
+  /**
+   * Reasoning effort to ask for, for models that always reason (GPT-6 Astra). Keeps answers quick and
+   * inside the output budget. Sent as `reasoning.effort` to the AI Gateway and `reasoning_effort` to OpenAI.
+   */
+  effort?: "low" | "medium" | "high";
+  /**
+   * How long one call may take before the next model is used. Models that always reason are slower
+   * than the 20 s default even at low effort.
+   */
+  timeoutMs?: number;
 };
 
+/** Per-call limit for models without their own `timeoutMs`. */
+export const AI_DEFAULT_TIMEOUT_MS = 20_000;
+/** Slow (reasoning) models: long enough for low-effort reasoning plus a short answer. */
+const SLOW_MS = 40_000;
+
 export const AI_MODELS: readonly AiModelSpec[] = [
-  { id: "grok-4.7", label: "Grok 4.7", provider: "grok", direct: "grok-4.7" },
-  { id: "grok-4.6", label: "Grok 4.6", provider: "grok", direct: "grok-4.6" },
+  // Grok 4.7 and 4.6 always reason (it can't be turned off) and default to high effort; low keeps
+  // a short cited answer quick. https://docs.x.ai (reasoning_effort: low | medium | high | xhigh).
+  { id: "grok-4.7", label: "Grok 4.7", provider: "grok", direct: "grok-4.7", effort: "low", timeoutMs: SLOW_MS },
+  { id: "grok-4.6", label: "Grok 4.6", provider: "grok", direct: "grok-4.6", effort: "low", timeoutMs: SLOW_MS },
   { id: "grok-4.3", label: "Grok 4.3", provider: "grok", direct: "grok-4.3" },
+  // Model ids checked against https://ai-gateway.vercel.sh/v1/models (Oct 1, 2026).
+  { id: "gpt-6-astra", label: "GPT-6 Astra", provider: "openai", direct: "gpt-6-astra", gateway: "openai/gpt-6-astra", effort: "low", timeoutMs: SLOW_MS },
   { id: "gpt-4.1-mini", label: "GPT-4.1 mini", provider: "openai", direct: "gpt-4.1-mini", gateway: "openai/gpt-4.1-mini" },
   { id: "gpt-4o-mini", label: "GPT-4o mini", provider: "openai", direct: "gpt-4o-mini", gateway: "openai/gpt-4o-mini" },
   { id: "gemini-2.5-flash-lite", label: "Gemini 2.5 Flash Lite", provider: "gemini", gateway: "google/gemini-2.5-flash-lite" },
@@ -74,7 +91,14 @@ export const AI_MODELS: readonly AiModelSpec[] = [
     provider: "claude",
     direct: "claude-sonnet-5-5",
     gateway: "anthropic/claude-sonnet-5.5",
-    paidGateway: true,
+    timeoutMs: 35_000,
+  },
+  {
+    id: "claude-haiku-4.5",
+    label: "Claude Haiku 4.5",
+    provider: "claude",
+    direct: "claude-haiku-4-5",
+    gateway: "anthropic/claude-haiku-4.5",
   },
 ];
 
@@ -97,17 +121,26 @@ export function aiChoiceOf(value: unknown): string | undefined {
   return aiModelOf(value) ?? aiProviderOf(value);
 }
 
-export function modelReady(spec: AiModelSpec, keys: AiKeyFlags): boolean {
-  if (spec.provider === "gemini") return keys.gateway && Boolean(spec.gateway);
-  if (spec.provider === "grok") return keys.grok && Boolean(spec.direct);
-  const own = spec.provider === "openai" ? keys.openai : keys.claude;
-  if (own && spec.direct) return true;
-  return !own && keys.gateway && Boolean(spec.gateway) && !spec.paidGateway;
+/** True when this model would be called through the AI Gateway (no key of its provider's own). */
+function viaGateway(spec: AiModelSpec, keys: AiKeyFlags): boolean {
+  if (spec.provider === "gemini") return true;
+  if (spec.provider === "grok") return false;
+  return !(spec.provider === "openai" ? keys.openai : keys.claude);
 }
 
-export function modelNote(spec: AiModelSpec, keys: AiKeyFlags): string | undefined {
-  if (modelReady(spec, keys)) return undefined;
-  if (spec.paidGateway && keys.gateway && !(spec.provider === "claude" ? keys.claude : false)) return "needs a paid plan";
+/**
+ * `planBlocked` holds the ids of models the AI Gateway has refused for this account's plan
+ * (the server learns that from a real refusal; see ai.server.ts). They stay listed but cannot be picked.
+ */
+export function modelReady(spec: AiModelSpec, keys: AiKeyFlags, planBlocked: ReadonlySet<string> = new Set()): boolean {
+  if (spec.provider === "grok") return keys.grok && Boolean(spec.direct);
+  if (!viaGateway(spec, keys)) return Boolean(spec.direct);
+  return keys.gateway && Boolean(spec.gateway) && !planBlocked.has(spec.id);
+}
+
+export function modelNote(spec: AiModelSpec, keys: AiKeyFlags, planBlocked: ReadonlySet<string> = new Set()): string | undefined {
+  if (modelReady(spec, keys, planBlocked)) return undefined;
+  if (keys.gateway && viaGateway(spec, keys) && planBlocked.has(spec.id)) return "needs a paid plan";
   return "not set up";
 }
 
@@ -169,8 +202,75 @@ export type AiAnswer =
       requested?: AnswerProviderId;
       /** Set-up providers that were tried first and failed. */
       failed: AnswerProviderId[];
+      /** The menu model the reader picked, when there was one. */
+      picked?: string;
+      /** Every model that was tried before the one that answered, with why it failed. */
+      attempts?: AiAttempt[];
     }
-  | { status: "unconfigured" | "no-context" | "error"; message: string; failed?: AnswerProviderId[] };
+  | {
+      status: "unconfigured" | "no-context" | "error";
+      message: string;
+      failed?: AnswerProviderId[];
+      picked?: string;
+      attempts?: AiAttempt[];
+    };
+
+/** Why one model did not answer. Never holds keys or the reader's text. */
+export type AiFailureKind =
+  | "plan"
+  | "auth"
+  | "bad-request"
+  | "not-found"
+  | "rate-limit"
+  | "timeout"
+  | "server"
+  | "empty"
+  | "network"
+  | "unavailable"
+  | "other";
+
+export type AiAttempt = {
+  provider: AnswerProviderId;
+  /** The model id that was sent (gateway or provider id), or the menu id when it was never sent. */
+  model: string;
+  kind: AiFailureKind;
+  /** HTTP status, when the provider replied. */
+  status?: number;
+  /** The provider's own short error message, cleaned of keys and the reader's text. */
+  detail?: string;
+};
+
+/** How long the server gives this menu model before falling back. */
+export function aiModelTimeoutMs(id: string | undefined): number {
+  return AI_MODELS.find((model) => model.id === id)?.timeoutMs ?? AI_DEFAULT_TIMEOUT_MS;
+}
+
+/** The menu label for a menu, gateway, or provider model id ("openai/gpt-6-astra" -> "GPT-6 Astra"). */
+export function aiModelLabelFor(model: string): string {
+  const spec = AI_MODELS.find((item) => item.id === model || item.gateway === model || item.direct === model);
+  return spec?.label ?? model;
+}
+
+function answeredBy(spec: AiModelSpec, model: string): boolean {
+  return [spec.id, spec.direct, spec.gateway].some((id) => Boolean(id) && (model === id || model.startsWith(`${id}-`)));
+}
+
+/**
+ * The models to name in "X didn't answer, so Y did": every failed attempt, plus the reader's pick
+ * whenever a different model wrote the answer, even from the same provider. Empty when the pick
+ * answered.
+ */
+export function fallbackFailures(answer: Extract<AiAnswer, { status: "ok" }>): string[] {
+  const labels: string[] = [];
+  const add = (label: string) => {
+    if (!labels.includes(label)) labels.push(label);
+  };
+  const spec = answer.picked ? AI_MODELS.find((item) => item.id === answer.picked) : undefined;
+  if (spec && !answeredBy(spec, answer.model)) add(spec.label);
+  for (const attempt of answer.attempts ?? []) add(aiModelLabelFor(attempt.model));
+  if (!labels.length && !answer.attempts) for (const id of answer.failed) add(aiProviderLabel(id));
+  return labels;
+}
 
 export const AI_MESSAGES = {
   unconfigured: "AI answers aren’t set up yet.",

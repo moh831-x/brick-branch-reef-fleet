@@ -23,6 +23,11 @@ import { GROK_PAGE, IMAGES_MAX_PAGE, IMAGES_PAGE, MAX_PAGE, PAGE, WEB_PAGE, page
 import {
   AI_MESSAGES,
   AI_MODELS,
+  aiModelLabelFor,
+  aiModelTimeoutMs,
+  fallbackFailures,
+  type AiAttempt,
+  type AiFailureKind,
   aiChoiceOf,
   aiProviderLabel,
   pickAiContext,
@@ -1244,7 +1249,10 @@ function AiAnswerCard({
 
   const available = Array.isArray(providers) ? providers.filter((row) => row.available).map((row) => row.id) : [];
   // Nothing is asked until the list loads. If the list fails, the server still picks and falls back.
-  const selected = Array.isArray(providers) ? selectedAiModel(aiModel, available) : aiModel;
+  // A known pick is always sent, even when the list says it can't run: the server then answers
+  // with another model and says which pick failed and why, instead of switching quietly here.
+  const picked = aiModel && AI_MODELS.some((model) => model.id === aiModel) ? aiModel : undefined;
+  const selected = picked ?? (Array.isArray(providers) ? selectedAiModel(aiModel, available) : aiModel);
   const normalized = query.replace(/\s+/g, " ");
   // The page language is part of the key: switching language writes the answer again in it, and a
   // search re-run for the new language (data.pageLang) asks again with the new results.
@@ -1283,6 +1291,14 @@ function AiAnswerCard({
 
   const answer = state?.key === key ? state.answer : null;
   const pending = !answer;
+  // After a few seconds, say how long the pick may take (slow reasoning models wait up to 40 s).
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    setSlow(false);
+    if (!pending) return;
+    const timer = setTimeout(() => setSlow(true), 8000);
+    return () => clearTimeout(timer);
+  }, [pending, key, attempt]);
 
   return (
     <section
@@ -1305,6 +1321,11 @@ function AiAnswerCard({
             <p className="text-sm text-muted">
               {selected ? fill(copy.asking, { model: modelLabel(selected) }) : copy.writing}
             </p>
+            {slow && selected ? (
+              <p className="mt-1 text-xs text-muted">
+                {fill(copy.aiSlow, { model: modelLabel(selected), seconds: String(Math.round(aiModelTimeoutMs(selected) / 1000)) })}
+              </p>
+            ) : null}
             <div className="mt-3 grid gap-2" aria-hidden="true">
               <div className="h-3.5 w-full animate-pulse rounded bg-line" />
               <div className="h-3.5 w-11/12 animate-pulse rounded bg-line" />
@@ -1344,18 +1365,22 @@ function AiAnswerCard({
               </ol>
             ) : null}
             <p className="mt-3 text-xs leading-relaxed text-muted">
-              {answer.failed.length > 0 ? (
+              {fallbackFailures(answer).length > 0 ? (
                 <>
-                  {fill(copy.failedSo, {
-                    failed: answer.failed.map(aiProviderLabel).join(", "),
-                    provider: aiProviderLabel(answer.provider),
-                  })}{" "}
+                  <span>
+                    {fill(copy.failedSo, {
+                      failed: fallbackFailures(answer).join(", "),
+                      provider: aiModelLabelFor(answer.model) === answer.model ? aiProviderLabel(answer.provider) : aiModelLabelFor(answer.model),
+                    })}
+                  </span>{" "}
                 </>
               ) : null}
-              {fill(copy.writtenBy, { provider: aiProviderLabel(answer.provider), model: answer.model })}
+              <span>{fill(copy.writtenBy, { provider: aiProviderLabel(answer.provider), model: answer.model })}</span>
             </p>
+            {answer.attempts && answer.attempts.length > 0 ? <AiAttemptDetails attempts={answer.attempts} copy={copy} /> : null}
           </>
         ) : (
+          <>
           <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
             <p className="text-sm text-muted">
               {answer.status === "unconfigured" ? copy.aiUnconfigured : answer.status === "no-context" ? copy.aiNoContext : copy.aiError}
@@ -1371,9 +1396,48 @@ function AiAnswerCard({
               </button>
             ) : null}
           </div>
+          {answer.attempts && answer.attempts.length > 0 ? <AiAttemptDetails attempts={answer.attempts} copy={copy} /> : null}
+          </>
         )}
       </div>
     </section>
+  );
+}
+
+const FAILURE_COPY: Record<AiFailureKind, keyof UiCopy> = {
+  plan: "failPlan",
+  auth: "failAuth",
+  "bad-request": "failBadRequest",
+  "not-found": "failNotFound",
+  "rate-limit": "failRateLimit",
+  timeout: "failTimeout",
+  server: "failServer",
+  empty: "failEmpty",
+  network: "failNetwork",
+  unavailable: "failUnavailable",
+  other: "failOther",
+};
+
+/** "Why?" under a fallback answer: each model that was tried first, and what its provider said. */
+function AiAttemptDetails({ attempts, copy }: { attempts: AiAttempt[]; copy: UiCopy }) {
+  return (
+    <details className="mt-1.5 text-xs leading-relaxed text-muted">
+      <summary className="inline-flex min-h-11 cursor-pointer items-center underline-offset-2 hover:underline">{copy.aiWhy}</summary>
+      <ul className="space-y-1 pb-1">
+        {attempts.map((attempt, index) => (
+          <li key={`${attempt.model}-${index}`}>
+            <span className="text-ink">{aiModelLabelFor(attempt.model)}</span>
+            <span>{": "}</span>
+            <span>{copy[FAILURE_COPY[attempt.kind]]}</span>
+            {attempt.status || attempt.detail ? (
+              <span dir="ltr" lang="en" className="block break-words font-mono text-[11px] opacity-80">
+                {[attempt.status ? `HTTP ${attempt.status}` : "", attempt.model, attempt.detail ?? ""].filter(Boolean).join(" · ")}
+              </span>
+            ) : null}
+          </li>
+        ))}
+      </ul>
+    </details>
   );
 }
 
