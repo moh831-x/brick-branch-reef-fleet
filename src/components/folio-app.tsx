@@ -38,6 +38,7 @@ import {
 } from "@/lib/ai.shared";
 import { SiteFooter } from "@/components/site-footer";
 import { fill, sourceLabel, type UiCopy } from "@/lib/ui-copy";
+import { GraphCard } from "@/components/graph-card";
 import { langDir, langInfo, PREVIEW_TRANSLATE_CHARS, type UiLang } from "@/lib/i18n";
 import { clickAction, factsOf, trackPresses } from "@/lib/select-click";
 import { useLang } from "@/lib/lang-context";
@@ -1000,11 +1001,14 @@ function Results({
   }, [query, data]);
 
   const aiCard = <AiAnswerCard query={query} data={data} loading={loading} sources={sources} aiModel={aiModel} copy={copy} lang={lang} />;
+  // Graphing searches ("graph x", "plot sin(x)", "y = x^2") get a plot first; it needs no results.
+  const graphCard = <GraphCard query={query} copy={copy} onPick={onDive} />;
 
   if (!data) {
     return (
       <div className="grid gap-4" aria-busy="true">
         <h1 className="font-display text-4xl text-ink">{query}</h1>
+        {graphCard}
         {aiCard}
         <Skeleton />
       </div>
@@ -1037,6 +1041,7 @@ function Results({
         </div>
       </div>
 
+      <div className="mb-6 empty:hidden lg:me-[22.5rem]">{graphCard}</div>
       {aiCard ? <div className="mb-8 lg:me-[22.5rem]">{aiCard}</div> : null}
 
       <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-10 lg:grid-cols-[minmax(0,1fr)_20rem]">

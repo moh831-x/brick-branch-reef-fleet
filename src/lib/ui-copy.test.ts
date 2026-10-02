@@ -10,7 +10,7 @@ const SAME_AS_ENGLISH = new Set<keyof UiCopy>(["grok"]);
 const SAME_IN: Partial<Record<UiLang, (keyof UiCopy)[]>> = {
   "es-ES": ["web", "wiki"],
   "fr-FR": ["web", "images", "image"],
-  "de-DE": ["web", "wiki", "optional"],
+  "de-DE": ["web", "wiki", "optional", "graphTitle"],
   "pt-BR": ["web"],
 };
 
