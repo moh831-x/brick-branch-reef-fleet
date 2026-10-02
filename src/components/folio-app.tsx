@@ -39,6 +39,7 @@ import {
 import { SiteFooter } from "@/components/site-footer";
 import { fill, sourceLabel, type UiCopy } from "@/lib/ui-copy";
 import { questionCopy } from "@/lib/question-copy";
+import { AnswerCode } from "@/components/answer-code";
 import { AnswerImage } from "@/components/answer-image";
 import { GraphCard } from "@/components/graph-card";
 import { langDir, langInfo, PREVIEW_TRANSLATE_CHARS, type UiLang } from "@/lib/i18n";
@@ -1337,9 +1338,9 @@ function AiAnswerCard({
           </div>
         ) : answer.status === "ok" ? (
           <>
-            <p className="mt-3 text-base leading-relaxed text-ink">
-              <AiText parts={answer.parts} citations={answer.citations} copy={copy} />
-            </p>
+            <div className="mt-3 min-w-0 text-base leading-relaxed text-ink">
+              <AiText parts={answer.parts} citations={answer.citations} copy={copy} lang={lang} />
+            </div>
             <ReadAloud
               resetKey={key}
               lang={lang}
@@ -1575,15 +1576,18 @@ function AiText({
   parts,
   citations,
   copy,
+  lang,
 }: {
   parts: AiPart[];
+  lang: UiLang;
   citations: Extract<AiAnswer, { status: "ok" }>["citations"];
   copy: UiCopy;
 }) {
   return (
     <>
       {parts.map((part, index) => {
-        if ("text" in part) return <span key={index}>{part.text}</span>;
+        if ("code" in part) return <AnswerCode key={index} code={part.code} language={part.language} lang={lang} />;
+        if ("text" in part) return <span key={index} className="whitespace-pre-wrap">{part.text.split(/(`[^`\n]+`)/g).map((text, i) => text.startsWith("`") && text.endsWith("`") ? <code key={i} dir="ltr" className="rounded bg-line px-1 font-mono text-sm">{text.slice(1, -1)}</code> : text)}</span>;
         const cite = citations[part.cite - 1];
         if (!cite) return null;
         return (
