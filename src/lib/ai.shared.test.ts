@@ -232,3 +232,24 @@ describe("fallback note", () => {
     assert.equal(modelReady(muse, { ...keys, meta: true }), true);
   });
 });
+
+describe("code answers", () => {
+  it("preserves code indentation, array indexes, backticks, and literal HTML", () => {
+    const code = 'int values[1] = {3};\n  printf("<b>hi</b> `value` **");';
+    const parsed = parseAiAnswer('Try this [2].\n\n```c\n' + code + '\n```\n\nRun `gcc hello.c -o hello`.', context);
+    assert.deepEqual(parsed.parts.find(part => "code" in part), { code, language: "c" });
+    assert.equal(parsed.citations.length, 1);
+    assert.equal(parsed.citations[0].title, "Two");
+    assert.ok(parsed.text.includes(code));
+    assert.ok(parsed.text.includes('`gcc hello.c -o hello`'));
+  });
+  it("keeps multiple fenced blocks separate without invented citations", () => {
+    const parsed = parseAiAnswer('```c\nint a[2];\n```\nThen:\n~~~bash\ngcc a.c\n~~~', []);
+    assert.deepEqual(parsed.parts.filter(part => "code" in part), [{ code: 'int a[2];', language: 'c' }, { code: 'gcc a.c', language: 'bash' }]);
+    assert.deepEqual(parsed.citations, []);
+  });
+  it("preserves a truncated code fence and normalizes Windows newlines", () => {
+    const parsed = parseAiAnswer('Example:\r\n```python\r\nif True:\r\n    print("hi")', []);
+    assert.deepEqual(parsed.parts.find(part => "code" in part), { code: 'if True:\n    print("hi")', language: 'python' });
+  });
+});
