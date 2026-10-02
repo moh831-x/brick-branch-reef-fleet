@@ -64,6 +64,12 @@ function HowToSearchPage() {
           while the answer is written.
         </p>
         <p>
+          A function can be the search. Typing y = sin(x), plot x², or graph 2x + 1 draws that curve inside the same
+          AI answer. There is one card, not a separate graph. Folio plots it on the page. The model then writes a few
+          sentences about that curve, and it does not treat unrelated results as the answer. Suggestions under the plot
+          try another function or a different range, such as y = sin(x) from -10 to 10.
+        </p>
+        <p>
           The model menu is inside the search bar. A model this copy of Folio cannot run is shown but cannot be
           picked. This browser remembers your pick, and it is also part of the page address. If the model you picked
           does not answer, Folio asks the next one that is set up, and the note under the answer says which one

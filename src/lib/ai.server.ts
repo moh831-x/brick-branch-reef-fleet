@@ -34,6 +34,7 @@ import {
   type AiProviderStatus,
   type AnswerProviderId,
 } from "./ai.shared.ts";
+import { graphAnswerBrief } from "./graph.ts";
 import { LANGS } from "./i18n.ts";
 
 type Env = Record<string, string | undefined>;
@@ -259,11 +260,18 @@ export function configForModel(modelId: string, env: Env = process.env): Provide
 type Request = { url: string; init: RequestInit };
 
 /** Build the HTTP request for one provider. Exported for tests; it performs no I/O. */
-export function buildProviderRequest(config: ProviderConfig, query: string, context: AiContextItem[], language?: string): Request {
-  const system = language
-    ? `${AI_SYSTEM_PROMPT} Write the entire answer in ${language}, even when the results are in another language.`
-    : AI_SYSTEM_PROMPT;
-  const prompt = buildAiPrompt(query, context, language);
+export function buildProviderRequest(
+  config: ProviderConfig,
+  query: string,
+  context: AiContextItem[],
+  language?: string,
+  graph?: string,
+): Request {
+  const graphNote = graph
+    ? " A graph of this search is already drawn in the answer. Describe that function in plain language. Do not say the results do not answer the search. Cite a numbered result only when it is about the same function."
+    : "";
+  const system = `${language ? `${AI_SYSTEM_PROMPT} Write the entire answer in ${language}, even when the results are in another language.` : AI_SYSTEM_PROMPT}${graphNote}`;
+  const prompt = buildAiPrompt(query, context, language, graph);
   if (config.api === "anthropic") {
     return {
       url: `${config.baseUrl}/messages`,
@@ -746,8 +754,9 @@ async function askProvider(
   fetcher: typeof fetch,
   language?: string,
   limits: { timeoutMs?: number; signal?: AbortSignal } = {},
+  graph?: string,
 ) {
-  const request = buildProviderRequest(config, query, context, language);
+  const request = buildProviderRequest(config, query, context, language, graph);
   const timeout = AbortSignal.timeout(limits.timeoutMs ?? timeoutFor(config));
   const signal = limits.signal ? AbortSignal.any([timeout, limits.signal]) : timeout;
   const response = await fetcher(request.url, { ...request.init, signal });
@@ -785,6 +794,7 @@ export async function runAiAnswer(
 ): Promise<AiAnswer> {
   const env = options.env ?? process.env;
   const fetcher = options.fetcher ?? fetch;
+  const graph = graphAnswerBrief(query);
   const totalMs = options.totalMs ?? AI_TOTAL_MS;
   const hedgeMs = options.hedgeMs ?? AI_HEDGE_MS;
   const minCallMs = options.minCallMs ?? MIN_CALL_MS;
@@ -826,7 +836,7 @@ export async function runAiAnswer(
   for (const id of order) push(readProviderConfig(id, env));
   const picked = pickedSpec ? { picked: pickedSpec.id } : {};
   if (!queue.length) return { status: "unconfigured", message: AI_MESSAGES.unconfigured, ...picked };
-  if (!context.length) return { status: "no-context", message: AI_MESSAGES.noContext, ...picked };
+  if (!context.length && !graph) return { status: "no-context", message: AI_MESSAGES.noContext, ...picked };
 
   const remaining = () => totalMs - (Date.now() - started);
   /** Try each model in turn until one answers; failures go into `log`. */
@@ -842,7 +852,7 @@ export async function runAiAnswer(
       for (;;) {
         const timeoutMs = Math.min(timeoutFor(config), remaining());
         try {
-          const answer = await askProvider(config, query, context, fetcher, options.answerLanguage, { timeoutMs, signal: stop });
+          const answer = await askProvider(config, query, context, fetcher, options.answerLanguage, { timeoutMs, signal: stop }, graph ?? undefined);
           return { ...answer, config };
         } catch (error) {
           if (stop?.aborted) return null;

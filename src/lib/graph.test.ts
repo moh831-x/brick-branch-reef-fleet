@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { buildPlot, cleanGraphQuery, evaluate, formatExpression, graphSuggestions, parseExpression, parseGraphQuery, ticks } from "./graph.ts";
+import { buildPlot, cleanGraphQuery, evaluate, formatExpression, graphAnswerBrief, graphSuggestions, parseExpression, parseGraphQuery, ticks } from "./graph.ts";
 
 const at = (source: string, x: number) => {
   const node = parseExpression(source);
@@ -152,6 +152,15 @@ describe("graph searches", () => {
     assert.ok(brackets && Math.abs(brackets.xMax - Math.PI) < 1e-12 && brackets.functions.length === 1);
     assert.deepEqual(parseGraphQuery("y = x from -10 to 10")?.functions.map((fn) => fn.source), ["x"]);
     assert.deepEqual([parseGraphQuery("graph x")?.xMin, parseGraphQuery("graph x")?.xMax], [-5, 5]);
+  });
+
+  it("briefs the AI answer about the curve, and stays quiet for other searches", () => {
+    const brief = graphAnswerBrief("y = sin(x)");
+    assert.match(brief ?? "", /y = sin\(x\)/);
+    assert.match(brief ?? "", /x is from -5 to 5/);
+    assert.match(brief ?? "", /already drawn in the answer/);
+    assert.equal(graphAnswerBrief("dogs"), null);
+    assert.equal(graphAnswerBrief("graph theory"), null);
   });
 });
 

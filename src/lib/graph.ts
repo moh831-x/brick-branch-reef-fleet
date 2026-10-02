@@ -675,6 +675,17 @@ export function buildPlot(request: GraphRequest): GraphPlot {
   return { series, xMin, xMax, yMin, yMax, xTicks: ticks(xMin, xMax), yTicks: ticks(yMin, yMax, 8) };
 }
 
+/** Facts about a plotted search, for the AI answer. Null when the query is not a graph. */
+export function graphAnswerBrief(query: string): string | null {
+  const request = parseGraphQuery(query);
+  if (!request) return null;
+  const plot = buildPlot(request);
+  if (!plot.series.length) return null;
+  const num = (value: number) => String(Number(value.toPrecision(4)));
+  const names = plot.series.map((series) => series.label).join(", ");
+  return `Folio plotted ${names}. x is from ${num(plot.xMin)} to ${num(plot.xMax)} and y is from ${num(plot.yMin)} to ${num(plot.yMax)}. The curve is already drawn in the answer.`;
+}
+
 /** Follow-up searches: a zoom change and one or two related functions. Always graphing requests. */
 export function graphSuggestions(request: GraphRequest): string[] {
   const shown = request.functions.map((fn) => fn.source.replace(/\s+/g, "").toLowerCase());

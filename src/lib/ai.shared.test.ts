@@ -125,6 +125,14 @@ describe("buildAiPrompt", () => {
     const prompt = buildAiPrompt("folio", context);
     assert.match(prompt, /^Search: folio/);
     assert.match(prompt, /\[2\] Two \(Wikipedia, https:\/\/en\.wikipedia\.org\/wiki\/Two\)\nb/);
+    assert.doesNotMatch(prompt, /Graph already shown/);
+  });
+
+  it("puts a plotted function in the same prompt without numbering it as a result", () => {
+    const prompt = buildAiPrompt("y = sin(x)", [], undefined, "Folio plotted y = sin(x). x is from -5 to 5 and y is from -5 to 5.");
+    assert.match(prompt, /Graph already shown with this answer:\nFolio plotted y = sin\(x\)/);
+    assert.match(prompt, /Results:\n\(none\)/);
+    assert.doesNotMatch(prompt, /\[1\]/);
   });
 });
 

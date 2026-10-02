@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
-import { LineChart, Search } from "lucide-react";
+import { Search } from "lucide-react";
 import { buildPlot, graphSuggestions, parseGraphQuery, type GraphPlot } from "@/lib/graph";
 import { fill, type UiCopy } from "@/lib/ui-copy";
 
@@ -31,8 +31,9 @@ function useWidth<T extends HTMLElement>(fallback: number) {
 }
 
 /**
- * A graph for searches like "graph x", "plot sin(x)", or "y = x^2 and 2x + 1". Renders nothing for
- * other searches. The plot is always left to right, also on Arabic pages.
+ * The plot for a function search ("y = sin(x)", "plot x^2", "graph 2x + 1"). Renders nothing
+ * otherwise. It sits inside the one AI answer, so it has no card or heading of its own.
+ * The plot is always left to right, also on Arabic pages.
  */
 export function GraphCard({ query, copy, onPick }: { query: string; copy: UiCopy; onPick: (query: string) => void }) {
   const request = useMemo(() => parseGraphQuery(query), [query]);
@@ -43,12 +44,8 @@ export function GraphCard({ query, copy, onPick }: { query: string; copy: UiCopy
   const names = plot.series.map((series) => series.label).join(", ");
 
   return (
-    <section aria-labelledby="graph-card" className="rounded-3xl border border-line bg-surface p-4 sm:p-5">
-      <h2 id="graph-card" className="flex items-center gap-2 font-display text-xl text-ink">
-        <LineChart className="size-4 text-accent" aria-hidden="true" />
-        <span>{copy.graphTitle}</span>
-      </h2>
-      <p className="mt-2 text-base leading-relaxed text-ink">
+    <div className="mt-3">
+      <p className="text-base leading-relaxed text-ink">
         <GraphLead template={copy.graphLead} names={names} />
       </p>
       <div ref={boxRef} className="mt-3" dir="ltr">
@@ -74,7 +71,7 @@ export function GraphCard({ query, copy, onPick }: { query: string; copy: UiCopy
           </ul>
         </div>
       ) : null}
-    </section>
+    </div>
   );
 }
 

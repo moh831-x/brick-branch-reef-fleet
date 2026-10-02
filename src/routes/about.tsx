@@ -36,7 +36,9 @@ function AboutPage() {
           Web, Wikipedia, and Grokipedia start switched on. Images starts off and adds a grid of pictures from Bing’s
           public image results when you turn it on. Every search includes a short AI answer above the lists, with
           numbered links to the results it used. It is written from the top results of every source that is on by the
-          model you pick in the search bar. It is labeled as AI-generated and can be wrong. Wikipedia, Grokipedia, and
+          model you pick in the search bar. It is labeled as AI-generated and can be wrong. When the query is a
+          function, such as y = sin(x), that same answer also draws the graph. There is one answer card, not a separate
+          graph. Wikipedia, Grokipedia, and
           Images are marked optional. You can turn any of those sources on or off, and this browser remembers the
           choice. If every source is off, Folio does not run a search. The search button stays disabled, and the home
           page asks you to turn Web, Wikipedia, Grokipedia, or Images on again.

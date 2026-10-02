@@ -39,6 +39,7 @@ import {
 import { SiteFooter } from "@/components/site-footer";
 import { fill, sourceLabel, type UiCopy } from "@/lib/ui-copy";
 import { GraphCard } from "@/components/graph-card";
+import { parseGraphQuery } from "@/lib/graph";
 import { langDir, langInfo, PREVIEW_TRANSLATE_CHARS, type UiLang } from "@/lib/i18n";
 import { clickAction, factsOf, trackPresses } from "@/lib/select-click";
 import { useLang } from "@/lib/lang-context";
@@ -666,6 +667,7 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
           </h2>
           <div className="mt-3 grid gap-3 text-sm leading-relaxed text-muted">
             <p>{copy.how1}</p>
+            <p>{copy.howGraph}</p>
             <p>{copy.how2}</p>
             <p>
               {copy.how3before}{" "}
@@ -1000,15 +1002,12 @@ function Results({
     setOpenId(null);
   }, [query, data]);
 
-  const aiCard = <AiAnswerCard query={query} data={data} loading={loading} sources={sources} aiModel={aiModel} copy={copy} lang={lang} />;
-  // Graphing searches ("graph x", "plot sin(x)", "y = x^2") get a plot first; it needs no results.
-  const graphCard = <GraphCard query={query} copy={copy} onPick={onDive} />;
+  const aiCard = <AiAnswerCard query={query} data={data} loading={loading} sources={sources} aiModel={aiModel} copy={copy} lang={lang} onPick={onDive} />;
 
   if (!data) {
     return (
       <div className="grid gap-4" aria-busy="true">
         <h1 className="font-display text-4xl text-ink">{query}</h1>
-        {graphCard}
         {aiCard}
         <Skeleton />
       </div>
@@ -1041,7 +1040,6 @@ function Results({
         </div>
       </div>
 
-      <div className="mb-6 empty:hidden lg:me-[22.5rem]">{graphCard}</div>
       {aiCard ? <div className="mb-8 lg:me-[22.5rem]">{aiCard}</div> : null}
 
       <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-10 lg:grid-cols-[minmax(0,1fr)_20rem]">
@@ -1208,8 +1206,8 @@ function loadAiProviders(): Promise<AiModelStatus[]> {
 /**
  * The AI answer at the top of the results. It waits for the other sources, then asks the
  * server for a short answer built from the top results of every source that is on (Web, Wikipedia,
- * Grokipedia, and Images). The lists render first and never wait on it. Paging a list does not ask
- * again; switching model does.
+ * Grokipedia, and Images). A function search draws its graph inside this same card. The lists
+ * render first and never wait on the model. Paging a list does not ask again; switching model does.
  */
 function AiAnswerCard({
   query,
@@ -1219,6 +1217,7 @@ function AiAnswerCard({
   aiModel,
   copy,
   lang,
+  onPick,
 }: {
   query: string;
   data: SearchPayload | null;
@@ -1227,6 +1226,7 @@ function AiAnswerCard({
   aiModel: string | undefined;
   copy: UiCopy;
   lang: UiLang;
+  onPick: (query: string) => void;
 }) {
   const [providers, setProviders] = useState<AiModelStatus[] | "failed" | null>(null);
   const [state, setState] = useState<AiState | null>(null);
@@ -1274,7 +1274,7 @@ function AiAnswerCard({
       grok: sources.grok ? data.grok : undefined,
       images: sources.images ? data.images : undefined,
     });
-    if (!context.length) {
+    if (!context.length && !parseGraphQuery(normalized)) {
       setState({ key, answer: { status: "no-context", message: AI_MESSAGES.noContext } });
       return;
     }
@@ -1315,6 +1315,7 @@ function AiAnswerCard({
           {copy.aiBadge}
         </p>
       </div>
+      <GraphCard query={query} copy={copy} onPick={onPick} />
       <div aria-live="polite">
         {pending ? (
           <div className="mt-3">
