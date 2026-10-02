@@ -470,7 +470,7 @@ describe("Claude through the AI Gateway: minimal, valid requests", () => {
     assert.deepEqual(Object.keys(sent).sort(), ["max_tokens", "messages", "model", "stream"]);
     assert.deepEqual((sent.messages as Array<{ role: string; content: string }>).map((m) => m.role), ["system", "user"]);
     assert.ok((sent.messages as Array<{ content: string }>).every((m) => m.content.trim().length > 0));
-    assert.equal(sent.max_tokens, 1200);
+    assert.equal(sent.max_tokens, 2200);
     // Own Anthropic key: the effort setting still applies there.
     assert.equal(readProviderConfig("claude", { ANTHROPIC_API_KEY: "a", ANTHROPIC_EFFORT: "low" })?.effort, "low");
     // Same for OpenAI: GPT-4.1 mini on the gateway gets no reasoning field.
@@ -478,11 +478,11 @@ describe("Claude through the AI Gateway: minimal, valid requests", () => {
   });
 
   it("never asks for more output than the model allows", () => {
-    assert.equal(outputBudget({ model: "anthropic/claude-3-haiku" }), 1200);
+    assert.equal(outputBudget({ model: "anthropic/claude-3-haiku" }), 2200);
     assert.equal(outputBudget({ model: "claude-3-haiku-20240307", effort: "low" }), 4096);
     assert.equal(outputBudget({ model: "claude-3-5-haiku-latest", effort: "low" }), 4200);
     assert.equal(outputBudget({ model: "openai/gpt-6-astra", effort: "low" }), 4200);
-    assert.equal(outputBudget({ model: "anthropic/claude-sonnet-5.5" }), 1200);
+    assert.equal(outputBudget({ model: "anthropic/claude-sonnet-5.5" }), 2200);
   });
 
   it("retries a 5xx once on the same model before falling back", async () => {
