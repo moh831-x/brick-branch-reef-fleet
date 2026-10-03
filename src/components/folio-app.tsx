@@ -653,7 +653,7 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
   );
 
   const sourcePills = (
-    <div className="flex flex-wrap gap-2">
+    <div className={onResults && (chatReady || imageTarget) ? "flex gap-2 overflow-x-auto pb-1" : "flex flex-wrap gap-2"}>
       {(Object.keys(SOURCE_META) as PillId[]).map((key) => (
         <SourcePill key={key} id={key} on={sources[key]} copy={copy} onToggle={() => toggle(key)} />
       ))}
@@ -669,7 +669,7 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
       {onResults ? (
         <header
           className={`fixed inset-x-0 top-0 z-20 border-b border-line bg-bg transition-transform duration-200 ease-out ${
-            !chatReady && chrome === "hidden" && !open ? "-translate-y-full" : "translate-y-0"
+            !chatReady && !imageTarget && chrome === "hidden" && !open ? "-translate-y-full" : "translate-y-0"
           }`}
         >
           <div className="mx-auto flex max-w-6xl flex-col px-4 py-3 sm:px-6">
@@ -677,13 +677,13 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
               type="button"
               onClick={goHome}
               className={`w-fit font-display text-2xl tracking-tight text-ink transition-transform duration-150 ease-out active:scale-[0.96] ${
-                !chatReady && chrome === "search" && !open ? "hidden" : ""
+                !chatReady && !imageTarget && chrome === "search" && !open ? "hidden" : ""
               }`}
             >
               Folio
             </button>
-            <div className={!chatReady && chrome === "search" && !open ? "" : "pt-4"}>{searchForm}</div>
-            <div className={!chatReady && chrome === "search" && !open ? "hidden" : "pt-4"}>{sourcePills}</div>
+            <div className={!chatReady && !imageTarget && chrome === "search" && !open ? "" : "pt-4"}>{searchForm}</div>
+            <div className={!chatReady && !imageTarget && chrome === "search" && !open ? "hidden" : "pt-4"}>{sourcePills}</div>
           </div>
         </header>
       ) : (
@@ -772,7 +772,7 @@ function SourcePill({ id, on, copy, onToggle }: { id: PillId; on: boolean; copy:
       type="button"
       aria-pressed={on}
       onClick={onToggle}
-      className={`inline-flex min-h-11 items-center gap-2 rounded-full border px-3 text-sm transition-transform duration-150 ease-out active:scale-[0.96] ${
+      className={`inline-flex min-h-11 shrink-0 items-center gap-2 whitespace-nowrap rounded-full border px-3 text-sm transition-transform duration-150 ease-out active:scale-[0.96] ${
         on ? "border-accent bg-accent-soft text-ink" : "border-line bg-surface text-muted"
       }`}
     >
