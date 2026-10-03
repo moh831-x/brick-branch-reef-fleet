@@ -1,5 +1,7 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme {
   --font-sans: "Outfit", ui-sans-serif, system-ui, sans-serif;
   --font-display: "Fraunces", Georgia, "Times New Roman", serif;
@@ -10,6 +12,22 @@
   --color-line: #e4dcd0;
   --color-accent: #0e6b52;
   --color-accent-soft: #e4f2ec;
+  --color-scrim: #141311;
+  --radius-desk: 1.75rem;
+  --radius-field: 1rem;
+  --shadow-desk: 0 1px 0 var(--color-line), 0 18px 36px -28px color-mix(in oklab, var(--color-ink) 45%, transparent);
+}
+
+html.dark {
+  --color-bg: #141311;
+  --color-surface: #211e1a;
+  --color-ink: #f4efe6;
+  --color-muted: #b3a898;
+  --color-line: #3a342c;
+  --color-accent: #7dceb0;
+  --color-accent-soft: #1c3330;
+  --color-scrim: #000000;
+  color-scheme: dark;
 }
 
 @layer base {
@@ -19,10 +37,22 @@
   }
 
   body {
-    background: var(--color-bg);
+    background-color: var(--color-bg);
     color: var(--color-ink);
     font-family: var(--font-sans);
     min-height: 100vh;
+  }
+
+  @media (min-width: 1024px) {
+    body {
+      background-image: linear-gradient(
+        90deg,
+        transparent calc(50% - 24rem - 1px),
+        color-mix(in oklab, var(--color-ink) 22%, var(--color-bg)) calc(50% - 24rem - 1px),
+        color-mix(in oklab, var(--color-ink) 22%, var(--color-bg)) calc(50% - 24rem),
+        transparent calc(50% - 24rem)
+      );
+    }
   }
 
   h1,

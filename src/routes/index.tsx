@@ -8,7 +8,7 @@ import { GROK_PAGE, IMAGES_MAX_PAGE, IMAGES_PAGE, PAGE, WEB_PAGE, pageOf } from 
 
 const HOME_TITLE = "Folio by Zip1 — Web, Wikipedia & Grokipedia Search";
 const HOME_DESCRIPTION =
-  "Search the web with Folio by Zip1. Explore web results and optional Wikipedia and Grokipedia sources from one simple search interface.";
+  "Search the Web with Folio by Zip1. Explore web results and optional Wikipedia and Grokipedia sources from one simple search interface.";
 const HOME_URL = "https://www.zip1.ai/";
 
 const websiteJsonLd = {

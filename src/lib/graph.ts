@@ -683,7 +683,7 @@ export function graphAnswerBrief(query: string): string | null {
   if (!plot.series.length) return null;
   const num = (value: number) => String(Number(value.toPrecision(4)));
   const names = plot.series.map((series) => series.label).join(", ");
-  return `Folio plotted ${names}. x is from ${num(plot.xMin)} to ${num(plot.xMax)} and y is from ${num(plot.yMin)} to ${num(plot.yMax)}. The curve is already drawn in the answer.`;
+  return `Folio plotted ${names} as a smooth curve from hundreds of sample points, not a chart of integers. x is from ${num(plot.xMin)} to ${num(plot.xMax)} and y is from ${num(plot.yMin)} to ${num(plot.yMax)}. The curve is already drawn in the answer. Describe its shape. Do not say it looks angular, jagged, or that it only connects integer x values.`;
 }
 
 /** Follow-up searches: a zoom change and one or two related functions. Always graphing requests. */

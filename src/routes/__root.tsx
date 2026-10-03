@@ -7,6 +7,8 @@ import { useLang } from "@/lib/lang-context";
 import { detectLang } from "@/lib/lang-state";
 import { DEFAULT_LANG } from "@/lib/i18n";
 import { installBrowserDomGuard } from "@/lib/dom-guard";
+import { detectTheme } from "@/lib/theme";
+import { ThemeProvider, useTheme } from "@/lib/theme-context";
 import appCss from "../styles.css?url";
 
 // Before React hydrates: keep page translators from crashing React (see dom-guard.ts).
@@ -14,7 +16,7 @@ installBrowserDomGuard();
 
 export const Route = createRootRoute({
   // The page language, so the server renders the right words, `lang`, and `dir` the first time.
-  loader: () => detectLang(),
+  loader: async () => ({ lang: await detectLang(), theme: await detectTheme() }),
   head: () => ({
     meta: [
       { charSet: "utf-8" },
@@ -38,21 +40,31 @@ export const Route = createRootRoute({
 });
 
 function RootComponent() {
-  const initial = Route.useLoaderData();
+  const { lang, theme } = Route.useLoaderData();
   return (
-    <LangProvider initial={initial}>
-      <RootDocument />
-    </LangProvider>
+    <ThemeProvider initial={theme}>
+      <LangProvider initial={lang}>
+        <RootDocument />
+      </LangProvider>
+    </ThemeProvider>
   );
 }
 
 function RootDocument() {
   const { lang, dir } = useLang();
+  const { theme } = useTheme();
   // In a language Folio translates itself, ask browsers not to translate the page on top of it.
   // English pages stay translatable for readers whose language Folio does not offer.
   const ownTranslation = lang !== DEFAULT_LANG;
   return (
-    <html lang={lang} dir={dir} translate={ownTranslation ? "no" : undefined} suppressHydrationWarning>
+    <html
+      lang={lang}
+      dir={dir}
+      className={theme === "dark" ? "dark" : undefined}
+      style={{ colorScheme: theme }}
+      translate={ownTranslation ? "no" : undefined}
+      suppressHydrationWarning
+    >
       <head>
         {ownTranslation ? <meta name="google" content="notranslate" /> : null}
         <HeadContent />

@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
+import { Fragment, createContext, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import { ArrowUp, ArrowUpRight, Check, Copy, ThumbsUp, ThumbsDown, MessageSquare, BookOpen, ChevronDown, ChevronLeft, ChevronRight, Clock, Compass, Globe, ImageIcon, Pause, Play, RotateCw, Search, Share, Sparkles, Square, TrendingUp, Volume2, X } from "lucide-react";
 import type { FolioSearch } from "@/routes/index";
@@ -32,12 +32,14 @@ import {
   selectedAiModel,
   type AiContextItem,
   type AiAnswer,
+  type AiCitation,
   type AiModelStatus,
   type AiPart,
 } from "@/lib/ai.shared";
 import { SiteFooter } from "@/components/site-footer";
 import { fill, sourceLabel, type UiCopy } from "@/lib/ui-copy";
 import { chatCopy, followUpPrompts } from "@/lib/chat-copy";
+import { relatedQuestions, relatedQuestionsTitle } from "@/lib/related-questions";
 import { CHAT_INPUT_MAX, type ChatMessage } from "@/lib/chat.shared";
 import { questionCopy } from "@/lib/question-copy";
 import { AnswerCode } from "@/components/answer-code";
@@ -59,6 +61,7 @@ import { clickAction, factsOf, trackPresses } from "@/lib/select-click";
 import { useLang } from "@/lib/lang-context";
 import { MIN_CONTENTS } from "@/lib/reader";
 import { LanguagePicker } from "@/components/language-picker";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { shareNative, tap, useIsNativeApp } from "@/lib/native";
 
 type Sources = { web: boolean; wiki: boolean; grok: boolean; images: boolean; ai: boolean };
@@ -550,7 +553,11 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
         {barPlaceholder}
       </label>
       <div
-        className={`flex items-center gap-2 rounded-3xl border border-line bg-surface px-3 focus-within:border-accent ${onResults ? "min-h-24 flex-wrap py-2" : "min-h-14"}`}
+        className={`flex items-center gap-2 px-2 ${
+          onResults
+            ? "min-h-24 flex-wrap rounded-desk border border-line bg-surface py-2 sm:px-3"
+            : "min-h-14 rounded-field bg-bg focus-within:ring-2 focus-within:ring-accent sm:px-3"
+        }`}
         onMouseDown={(event) => {
           const target = event.target as HTMLElement;
           if (target.closest("button, input, textarea")) return;
@@ -627,7 +634,7 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
           type="submit"
           disabled={!draft.trim() || Boolean(barTarget?.target.pending)}
           aria-label={following ? chatWords.send : copy.search}
-          className="inline-flex size-11 shrink-0 items-center justify-center rounded-full bg-ink text-bg transition-transform duration-150 ease-out active:scale-[0.96] disabled:opacity-40"
+          className="inline-flex size-11 shrink-0 items-center justify-center rounded-full bg-accent text-surface transition-transform duration-150 ease-out active:scale-[0.96] disabled:opacity-40"
         >
           <ArrowUp className="size-4" />
         </button>
@@ -636,7 +643,7 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
         <div
           id={listId}
           role="listbox"
-          className={`absolute right-0 left-0 z-30 max-h-[50vh] overflow-y-auto rounded-2xl border border-line bg-surface ${onResults ? "bottom-full mb-2" : "mt-2"}`}
+          className={`absolute right-0 left-0 z-30 max-h-[50vh] overflow-y-auto rounded-desk border border-line bg-surface shadow-desk ${onResults ? "bottom-full mb-2" : "mt-2"}`}
         >
           {typing ? (
             suggestions.map((item, index) => (
@@ -739,9 +746,9 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
   );
 
   const sourcePills = (
-    <div className={onResults ? "flex shrink-0 gap-2 whitespace-nowrap pb-1" : "flex flex-wrap gap-2"}>
+    <div className={onResults ? "flex shrink-0 gap-2 whitespace-nowrap pb-1" : "grid grid-cols-2 gap-2 sm:grid-cols-4"}>
       {(Object.keys(SOURCE_META) as PillId[]).map((key) => (
-        <SourcePill key={key} id={key} on={sources[key]} copy={copy} onToggle={() => toggle(key)} />
+        <SourcePill key={key} id={key} on={sources[key]} copy={copy} onToggle={() => toggle(key)} panel={!onResults} />
       ))}
     </div>
   );
@@ -756,11 +763,16 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
         <>
           <header className="border-b border-line bg-bg px-4 py-3 sm:px-6">
             <div className="mx-auto flex max-w-3xl items-center justify-between gap-4">
-              <button type="button" onClick={goHome} className="min-h-11 font-display text-2xl text-ink">Folio</button>
-              <LanguagePicker />
+              <button type="button" onClick={goHome} className="min-h-11 font-display text-3xl leading-none tracking-tight text-ink italic">
+                Folio
+              </button>
+              <div className="flex shrink-0 items-center gap-2">
+                <ThemeToggle />
+                <LanguagePicker />
+              </div>
             </div>
           </header>
-          <div ref={barRef} className="fixed inset-x-0 bottom-0 z-30 bg-bg px-3 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+          <div ref={barRef} className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-bg px-3 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
             <div className="mx-auto max-w-3xl">
               {barQuestion ? (
                 <ClarifyCard key={barQuestion.key} question={barQuestion.value} lang={uiLang} onAnswer={answerQuestion} onDismiss={barQuestion.dismiss} />
@@ -772,45 +784,60 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
         </>
       ) : (
         <>
-        <header className="flex min-h-screen flex-col items-center bg-bg px-4 pt-[18vh]">
-          <div className="fixed top-4 end-4 z-30">
-            <LanguagePicker />
-          </div>
-          <h1 className="mb-6 max-w-xl text-center font-display text-4xl leading-tight tracking-tight text-ink sm:text-5xl">
-            {copy.h1}
-          </h1>
-          <div className="w-full max-w-xl">{searchForm}</div>
-          <p className="mt-4 max-w-xl text-center text-sm leading-relaxed text-muted">
-            {copy.blurb}
-          </p>
-          {!anySource ? (
-            <div className="mt-4 w-full max-w-xl">
-              <p className="mb-2 text-sm text-accent">{questionCopy(uiLang).noSources}</p>
-              {sourcePills}
+          <header className="mx-auto flex w-full max-w-3xl items-end justify-between gap-4 px-4 pt-6 sm:pt-8">
+            <div>
+              <p className="font-display text-5xl leading-none tracking-tight text-ink italic sm:text-6xl">Folio</p>
+              <p className="mt-2 text-sm text-muted">Zip1</p>
             </div>
-          ) : null}
-        </header>
-        <section aria-labelledby="how-folio" className="mx-auto max-w-xl px-4 pb-16">
-          <h2 id="how-folio" className="font-display text-2xl text-ink">
-            {copy.howTitle}
-          </h2>
-          <div className="mt-3 grid gap-3 text-sm leading-relaxed text-muted">
-            <p>{copy.how1}</p>
-            <p>{copy.howGraph}</p>
-            <p>{copy.how2}</p>
-            <p>
-              {copy.how3before}{" "}
-              <Link to="/how-to-search" className="text-accent">
-                {copy.howTo}
-              </Link>{" "}
-              {copy.how3mid}{" "}
-              <Link to="/about" className="text-accent">
-                {copy.about}
-              </Link>{" "}
-              {copy.how3after}
-            </p>
+            <div className="flex shrink-0 items-center gap-2">
+              <ThemeToggle />
+              <LanguagePicker />
+            </div>
+          </header>
+          <div className="mx-auto w-full max-w-3xl px-4 pt-8 sm:pt-12">
+            <div className="rounded-desk border border-line bg-surface p-3 shadow-desk sm:p-4">
+              <div className="px-3 pt-2 pb-4 sm:px-4 sm:pt-3">
+                <h1 className="max-w-xl font-display text-3xl leading-tight tracking-tight text-ink sm:text-4xl">
+                  {copy.h1}
+                </h1>
+                <p className="mt-3 max-w-prose text-sm leading-relaxed text-muted sm:text-base">{copy.blurb}</p>
+              </div>
+              {searchForm}
+              {!anySource ? <p className="mt-3 px-3 text-sm text-accent">{questionCopy(uiLang).noSources}</p> : null}
+              <div className="mt-3">{sourcePills}</div>
+            </div>
           </div>
-        </section>
+          <section aria-labelledby="how-folio" className="mx-auto mt-16 w-full max-w-3xl px-4 pb-4 sm:mt-20">
+            <h2 id="how-folio" className="font-display text-2xl tracking-tight text-ink">
+              {copy.howTitle}
+            </h2>
+            <div className="mt-6 grid gap-8 sm:grid-cols-2">
+              <p className="text-sm leading-relaxed text-muted">
+                <span className="mb-2 block font-display text-lg text-accent">01</span>
+                {copy.how1}
+              </p>
+              <p className="text-sm leading-relaxed text-muted">
+                <span className="mb-2 block font-display text-lg text-accent">02</span>
+                {copy.howGraph}
+              </p>
+              <p className="text-sm leading-relaxed text-muted">
+                <span className="mb-2 block font-display text-lg text-accent">03</span>
+                {copy.how2}
+              </p>
+              <p className="text-sm leading-relaxed text-muted">
+                <span className="mb-2 block font-display text-lg text-accent">04</span>
+                {copy.how3before}{" "}
+                <Link to="/how-to-search" className="font-medium text-accent">
+                  {copy.howTo}
+                </Link>{" "}
+                {copy.how3mid}{" "}
+                <Link to="/about" className="font-medium text-accent">
+                  {copy.about}
+                </Link>{" "}
+                {copy.how3after}
+              </p>
+            </div>
+          </section>
         </>
       )}
       {onResults ? (
@@ -840,22 +867,55 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
   );
 }
 
-function SourcePill({ id, on, copy, onToggle }: { id: PillId; on: boolean; copy: UiCopy; onToggle: () => void }) {
+function SourcePill({
+  id,
+  on,
+  copy,
+  onToggle,
+  panel = false,
+}: {
+  id: PillId;
+  on: boolean;
+  copy: UiCopy;
+  onToggle: () => void;
+  panel?: boolean;
+}) {
   const meta = SOURCE_META[id];
   const Icon = meta.icon;
+  if (panel) {
+    return (
+      <button
+        type="button"
+        aria-pressed={on}
+        onClick={onToggle}
+        className={`flex min-h-16 flex-col items-start justify-center gap-1 rounded-field px-3 text-start transition-colors duration-150 ease-out active:scale-[0.98] ${
+          on ? "bg-accent-soft text-ink" : "bg-bg text-muted"
+        }`}
+      >
+        <span className="flex items-center gap-2 text-sm">
+          <Icon className="size-4 shrink-0" aria-hidden="true" />
+          {sourceLabel(copy, id)}
+        </span>
+        <span className={`text-xs ${on ? "text-accent" : "text-muted"}`}>
+          {on ? copy.on : copy.off}
+          {meta.optional ? <span> · {copy.optional}</span> : null}
+        </span>
+      </button>
+    );
+  }
   return (
     <button
       type="button"
       aria-pressed={on}
       onClick={onToggle}
-      className={`inline-flex min-h-11 shrink-0 items-center gap-2 whitespace-nowrap rounded-full border px-3 text-sm transition-transform duration-150 ease-out active:scale-[0.96] ${
+      className={`inline-flex min-h-11 shrink-0 items-center gap-2 whitespace-nowrap rounded-full border px-3.5 text-sm transition-colors duration-150 ease-out active:scale-[0.98] ${
         on ? "border-accent bg-accent-soft text-ink" : "border-line bg-surface text-muted"
       }`}
     >
       <Icon className="size-4" aria-hidden="true" />
       {sourceLabel(copy, id)}
       {meta.optional ? <span className="text-xs text-muted">{copy.optional}</span> : null}
-      <span className="font-medium">{on ? copy.on : copy.off}</span>
+      <span className={`font-medium ${on ? "text-accent" : ""}`}>{on ? copy.on : copy.off}</span>
     </button>
   );
 }
@@ -1137,7 +1197,7 @@ function Results({
   if (!data) {
     return (
       <div className="grid gap-4" aria-busy="true">
-        <h1 className="font-display text-4xl text-ink">{query}</h1>
+        <h1 className="font-display text-4xl leading-tight tracking-tight break-words text-ink">{query}</h1>
         {aiCard}
         <Skeleton />
       </div>
@@ -1151,7 +1211,7 @@ function Results({
     <div className={loading ? "opacity-70" : undefined}>
       <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="font-display text-4xl text-ink sm:text-5xl">{query}</h1>
+          <h1 className="font-display text-4xl leading-tight tracking-tight break-words text-ink sm:text-5xl">{query}</h1>
           {data.webSearched && sources.web ? <SearchedAs label={copy.webSearchedAs} text={data.webSearched} /> : null}
           {data.searched && sources.wiki ? <SearchedAs label={copy.searchedAs} text={data.searched} /> : null}
           {data.grokSearched && sources.grok ? <SearchedAs label={copy.grokSearchedAs} text={data.grokSearched} /> : null}
@@ -1170,10 +1230,17 @@ function Results({
         </div>
       </div>
 
-      {aiCard ? <div className={blocks.length ? "mb-8 lg:me-[22.5rem]" : "mb-8 max-w-3xl"}>{aiCard}</div> : null}
+      {aiCard ? <div className="mb-8">{aiCard}</div> : null}
 
-      <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-10 lg:grid-cols-[minmax(0,1fr)_20rem]">
-        <div className="order-2 grid gap-10 lg:order-1">
+      {(data.card || data.places.length > 0 || data.definitions.length > 0) ? (
+        <div className="mb-8 grid gap-4">
+          {data.card ? <Lead card={data.card} copy={copy} /> : null}
+          <PlaceList places={data.places} error={data.placesError} copy={copy} />
+          <Definitions items={data.definitions} copy={copy} />
+        </div>
+      ) : null}
+
+      <div className="grid min-w-0 gap-10">
           {!anyHits && !loading && blocks.length > 0 ? (
             <p className="text-muted">{copy.nothing}</p>
           ) : null}
@@ -1217,10 +1284,10 @@ function Results({
                     }}
                   />
                 ) : (
-                  <ul className="grid grid-cols-[minmax(0,1fr)]">
+                  <ul className="grid gap-2">
                     {block.hits.map((hit, index) => (
                       <Fragment key={hit.id}>
-                        <li className={`border-b border-line ${hit.id === openId ? "bg-accent-soft" : ""}`}>
+                        <li className={`rounded-2xl border bg-surface ${hit.id === openId ? "border-accent bg-accent-soft" : "border-line"}`}>
                           <div className="flex items-start gap-1">
                             {/* Plain text, not a button: browsers will not start a text selection inside a button.
                                 The title link opens the preview on a plain click; a drag or selection never does. */}
@@ -1243,7 +1310,7 @@ function Results({
                                   <Highlight text={hit.title} query={query} />
                                 </SelectableLink>
                               </p>
-                              <p dir="ltr" className="mt-1 break-all text-xs text-muted">{hit.url}</p>
+                              <p dir="ltr" className="mt-1 truncate text-xs text-muted">{hit.url}</p>
                               {hit.snippet ? (
                                 <p dir="auto" className="mt-1 line-clamp-2 text-sm leading-relaxed text-muted">
                                   <Highlight text={hit.snippet} query={query} />
@@ -1263,7 +1330,7 @@ function Results({
                           </div>
                         </li>
                         {block.key === "web" && index === 0 && block.page === 1 && data.deepDive.length > 0 ? (
-                          <li className="border-b border-line py-4">
+                          <li className="rounded-2xl border border-line bg-surface px-4 py-4">
                             <DeepDive topic={query} items={data.deepDive} copy={copy} onPick={onDive} />
                           </li>
                         ) : null}
@@ -1292,13 +1359,6 @@ function Results({
             );
           })}
         </div>
-        <div className="order-1 grid gap-4 lg:order-2">
-          {data.card ? <Lead card={data.card} copy={copy} /> : null}
-          <PlaceList places={data.places} error={data.placesError} copy={copy} />
-          <Definitions items={data.definitions} copy={copy} />
-          {!data.card && !data.places.length && loading ? <Skeleton /> : null}
-        </div>
-      </div>
       {openHit ? (
         <ResultPeek
           hit={openHit}
@@ -1497,7 +1557,7 @@ function AiAnswerCard({
     <section
       aria-labelledby="ai-answer"
       aria-busy={pending}
-      className="py-4 sm:py-5"
+      className="rounded-desk border border-line bg-surface px-5 py-5 shadow-desk sm:px-6"
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 id="ai-answer" className="flex items-center gap-2 font-display text-xl text-ink">
@@ -1531,6 +1591,7 @@ function AiAnswerCard({
             </div>
           </div>
         ) : answer.status === "ok" ? (
+          <SourcePeek citations={answer.citations} lang={lang}>
           <>
             {trace ? <WorkSummary trace={trace} lang={lang} copy={copy} /> : null}
             <ResearchSteps items={answer.research} lang={lang} />
@@ -1567,6 +1628,7 @@ function AiAnswerCard({
             </p>
             {answer.attempts && answer.attempts.length > 0 ? <AiAttemptDetails attempts={answer.attempts} copy={copy} /> : null}
           </>
+          </SourcePeek>
         ) : (
           <>
           {trace ? <WorkSummary trace={trace} lang={lang} copy={copy} /> : null}
@@ -1595,7 +1657,7 @@ function AiAnswerCard({
         <button type="button" onClick={() => setAttempt(value => value + 1)} aria-label={copy.tryAgain} title={copy.tryAgain} className="mt-2 grid size-11 place-items-center rounded-full text-muted hover:bg-accent-soft hover:text-ink"><RotateCw className="size-4" aria-hidden="true" /></button>
       </div> : null}
       {answer?.status === "ok" ? <FollowUpSuggestions items={answer.question?.suggestions} lang={lang} onPick={(prompt) => sendFollowUp.current?.(prompt)} /> : null}
-      {answer?.status === "ok" ? <ChatFollowUps key={key} query={query} initial={answer} context={pickAiContext({ news: sources.web ? data?.news : undefined, web: sources.web ? data?.web : undefined, wiki: sources.wiki ? data?.wiki : undefined, grok: sources.grok ? data?.grok : undefined, images: sources.images ? data?.images : undefined })} model={selected} lang={lang} copy={copy} sendRef={sendFollowUp} /> : null}
+      {answer?.status === "ok" ? <ChatFollowUps key={key} query={query} dives={data?.deepDive ?? []} places={placeNames(data)} initial={answer} context={pickAiContext({ news: sources.web ? data?.news : undefined, web: sources.web ? data?.web : undefined, wiki: sources.wiki ? data?.wiki : undefined, grok: sources.grok ? data?.grok : undefined, images: sources.images ? data?.images : undefined })} model={selected} lang={lang} copy={copy} sendRef={sendFollowUp} /> : null}
     </section>
   );
 }
@@ -1777,13 +1839,14 @@ function AiText({
   /** Shown after the answer, or before its closing line when it is a list (news cards). */
   after?: ReactNode;
 }) {
+  const openSource = useContext(openSourcePeek);
   // An answer built from sources shows each point's sources as a chip (icon and name) where it cites them.
   const chips = citations.length > 0;
   const inline = (list: readonly AiPart[]) =>
     (chips ? groupCites(list) : list).map((part, index) => {
       if ("cites" in part) {
         const cites = part.cites.map((n) => citations[n - 1]).filter((cite): cite is (typeof citations)[number] => Boolean(cite));
-        return <SourceChip key={index} cites={cites} lang={lang} />;
+        return <SourceChip key={index} cites={cites} lang={lang} onOpen={openSource} />;
       }
       if ("code" in part) return <AnswerCode key={index} code={part.code} language={part.language} lang={lang} />;
       if ("text" in part) {
@@ -1794,16 +1857,14 @@ function AiText({
       if (!cite) return null;
       return (
         <sup key={index} className="ms-px">
-          <a
-            href={cite.url}
-            target="_blank"
-            rel="noreferrer"
-            {...selectSafeLink}
+          <button
+            type="button"
+            onClick={() => openSource(cite)}
             aria-label={fill(copy.sourceN, { n: String(cite.n), title: cite.title })}
             className="inline-block rounded-full bg-accent-soft px-[0.4em] py-[0.15em] text-[0.7rem] leading-none font-medium text-accent tabular-nums hover:bg-accent hover:text-bg"
           >
             {cite.n}
-          </a>
+          </button>
         </sup>
       );
     });
@@ -2614,7 +2675,7 @@ function ResultPeek({
 
   return (
     <div className="fixed inset-0 z-40">
-      <button type="button" aria-label={copy.close} onClick={onClose} className="absolute inset-0 bg-ink/35" />
+      <button type="button" aria-label={copy.close} onClick={onClose} className="absolute inset-0 bg-scrim/45" />
       <aside
         role="dialog"
         aria-modal="true"
@@ -3028,7 +3089,51 @@ function Skeleton() {
   );
 }
 
+const openSourcePeek = createContext<(cite: AiCitation) => void>(() => {});
+
+function citeToHit(cite: AiCitation): SearchHit {
+  return {
+    id: `cite-${cite.n}-${cite.url}`,
+    source: cite.source,
+    title: cite.title,
+    url: cite.url,
+    snippet: "",
+    meta: cite.site || siteHost(cite.url),
+    ...(cite.site ? { site: cite.site } : {}),
+  };
+}
+
+/** Keeps the page in place and opens a cited source in the side preview. */
+function SourcePeek({ citations, lang, children }: { citations: AiCitation[]; lang: UiLang; children: ReactNode }) {
+  const [index, setIndex] = useState<number | null>(null);
+  const hits = useMemo(() => citations.map(citeToHit), [citations]);
+  const open = useCallback((cite: AiCitation) => {
+    const at = citations.findIndex((item) => item.n === cite.n && item.url === cite.url);
+    if (at < 0) return;
+    tap("light");
+    setIndex(at);
+  }, [citations]);
+  const hit = index != null ? hits[index] : undefined;
+  return (
+    <openSourcePeek.Provider value={open}>
+      {children}
+      {hit && index != null ? (
+        <ResultPeek
+          hit={hit}
+          index={index}
+          total={hits.length}
+          lang={lang}
+          onClose={() => setIndex(null)}
+          onPrev={() => setIndex((current) => (current != null && current > 0 ? current - 1 : current))}
+          onNext={() => setIndex((current) => (current != null && current < hits.length - 1 ? current + 1 : current))}
+        />
+      ) : null}
+    </openSourcePeek.Provider>
+  );
+}
+
 function AnswerSources({ citations, copy }: { citations: Extract<AiAnswer, { status: "ok" }>["citations"]; copy: UiCopy }) {
+  const open = useContext(openSourcePeek);
   if (!citations.length) return null;
   return <details className="group mt-3">
     <summary className="flex min-h-11 w-fit cursor-pointer list-none items-center gap-2 rounded-full border border-line bg-bg px-3 text-sm text-ink hover:bg-accent-soft [&::-webkit-details-marker]:hidden">
@@ -3039,7 +3144,7 @@ function AnswerSources({ citations, copy }: { citations: Extract<AiAnswer, { sta
               <ol className="mt-4 grid grid-cols-[minmax(0,1fr)] gap-1 border-t border-line pt-3">
                 {citations.map((cite) => (
                   <li key={cite.n}>
-                    <SelectableLink href={cite.url} className="flex min-h-11 items-center gap-2 text-sm text-ink hover:text-accent">
+                    <SelectableLink href={cite.url} popup onOpen={() => open(cite)} className="flex min-h-11 items-center gap-2 text-sm text-ink hover:text-accent">
                       <span className="grid size-6 shrink-0 place-items-center rounded-full bg-accent-soft text-xs font-medium text-accent tabular-nums">
                         {cite.n}
                       </span>
@@ -3104,8 +3209,55 @@ type ChatTurn = { question: string; answer: AiAnswer | null; trace: WorkTrace | 
  * follow-ups while an answer is showing (see FollowUpBridge). This shows the conversation and tells
  * the search bar how to send.
  */
-function ChatFollowUps({ query, initial, context, model, lang, copy, sendRef }: {
-  query: string; initial: Extract<AiAnswer, { status: "ok" }>;
+function placeNames(data: SearchPayload | null): string[] {
+  if (!data) return [];
+  const names = data.places.map((place) => place.name);
+  if (data.card && /country|city|capital|state|province|region|island|territory|county/i.test(data.card.kicker)) names.push(data.card.title);
+  return names;
+}
+
+function RelatedQuestionList({
+  query,
+  dives,
+  places,
+  history = [],
+  lang,
+  disabled,
+  onPick,
+}: {
+  query: string;
+  dives: readonly string[];
+  places: readonly string[];
+  history?: readonly string[];
+  lang: UiLang;
+  disabled?: boolean;
+  onPick: (prompt: string) => void;
+}) {
+  const specific = relatedQuestions(query, lang, dives, places, history);
+  const prompts = specific.length ? specific : followUpPrompts[lang];
+  return (
+    <div className="mt-5">
+      {specific.length ? <h3 className="px-2 text-sm font-medium text-ink">{relatedQuestionsTitle(lang)}</h3> : null}
+      <div className="mt-1 grid gap-1">
+        {prompts.map((prompt) => (
+          <button
+            key={prompt}
+            type="button"
+            disabled={disabled}
+            onClick={() => onPick(prompt)}
+            className="flex min-h-11 items-center gap-3 rounded-xl px-2 text-start text-sm text-muted hover:bg-accent-soft hover:text-ink disabled:opacity-50"
+          >
+            <ArrowUpRight className="size-4 shrink-0" aria-hidden="true" />
+            <span>{prompt}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ChatFollowUps({ query, dives = [], places = [], initial, context, model, lang, copy, sendRef }: {
+  query: string; dives?: readonly string[]; places?: readonly string[]; initial: Extract<AiAnswer, { status: "ok" }>;
   context: AiContextItem[];
   model?: string; lang: UiLang; copy: UiCopy;
   sendRef?: { current: ((text: string) => void) | null };
@@ -3207,7 +3359,7 @@ function ChatFollowUps({ query, initial, context, model, lang, copy, sendRef }: 
     <div className="grid min-w-0 gap-5" aria-live="polite" aria-busy={pending}>
       {turns.map((turn, index) => <div key={index} className="min-w-0">
         <div dir="auto" className="mb-4 ms-auto w-fit max-w-full whitespace-pre-wrap break-words rounded-2xl bg-accent-soft px-4 py-3 text-sm text-ink">{turn.question}</div>
-        {turn.answer === null ? <><ResearchSteps items={turn.research} lang={lang} /><WorkLive trace={turn.trace} lang={lang} copy={copy} fallback={questionCopy(lang).writing} /></> : turn.answer.status === "ok" ? <>
+        {turn.answer === null ? <><ResearchSteps items={turn.research} lang={lang} /><WorkLive trace={turn.trace} lang={lang} copy={copy} fallback={questionCopy(lang).writing} /></> : turn.answer.status === "ok" ? <SourcePeek citations={turn.answer.citations} lang={lang}><>
           {turn.trace ? <WorkSummary trace={turn.trace} lang={lang} copy={copy} /> : null}
           <ResearchSteps items={turn.answer.research} lang={lang} />
           <div className="mt-2 min-w-0 text-base leading-relaxed"><AiText parts={turn.answer.parts} citations={turn.answer.citations} copy={copy} lang={lang} /></div>
@@ -3216,21 +3368,15 @@ function ChatFollowUps({ query, initial, context, model, lang, copy, sendRef }: 
           <div className="flex items-center gap-1"><AnswerCopy text={turn.answer.text} lang={lang} /><AnswerFeedback key={turn.answer.text} text={turn.answer.text} copy={copy} lang={lang} /><button type="button" disabled={pending} onClick={() => void ask(turn.question, turns.slice(0, index))} aria-label={copy.tryAgain} title={copy.tryAgain} className="mt-2 grid size-11 place-items-center rounded-full text-muted hover:bg-accent-soft disabled:opacity-50"><RotateCw className="size-4" aria-hidden="true" /></button></div>
           <FollowUpSuggestions items={turn.answer.question?.suggestions} lang={lang} disabled={pending} onPick={sendPrompt} />
           <p className="mt-2 text-xs text-muted">{fill(context.length ? copy.writtenBy : questionCopy(lang).writtenBy, { provider: aiProviderLabel(turn.answer.provider), model: turn.answer.model })}</p>
-        </> : <>
+        </></SourcePeek> : <>
           {turn.trace ? <WorkSummary trace={turn.trace} lang={lang} copy={copy} /> : null}
           <div className="mt-2 flex flex-wrap items-center gap-3"><p role="status" className="text-sm text-muted">{turn.answer.status === "unconfigured" ? copy.aiUnconfigured : copy.aiError}</p><button type="button" disabled={pending} onClick={() => void ask(turn.question, turns.slice(0, index))} className="min-h-11 rounded-full border border-line px-4 text-sm">{copy.tryAgain}</button></div>
         </>}
       </div>)}
     </div>
     <div ref={end} />
-    {/* After a clarifying reply, its own suggestions replace the generic follow-ups. */}
-    {openQuestion ? null : <div className="mt-5 grid gap-1">
-      {followUpPrompts[lang].map(prompt => <button key={prompt} type="button" disabled={pending}
-        onClick={() => sendPrompt(prompt)}
-        className="flex min-h-11 items-center gap-3 rounded-xl px-2 text-start text-sm text-muted hover:bg-accent-soft hover:text-ink disabled:opacity-50">
-        <ArrowUpRight className="size-4 shrink-0" aria-hidden="true" /><span>{prompt}</span>
-      </button>)}
-    </div>}
+    {/* After a clarifying reply, its own suggestions replace the related questions. */}
+    {openQuestion ? null : <RelatedQuestionList query={query} dives={dives} places={places} history={turns.map((turn) => turn.question)} lang={lang} disabled={pending} onPick={sendPrompt} />}
     <p className="mt-2 text-xs leading-relaxed text-muted">{labels.privacy}</p>
   </div>;
 }

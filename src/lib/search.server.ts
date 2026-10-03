@@ -952,20 +952,14 @@ async function defineQuery(query: string): Promise<WordDefinition[]> {
   const words = phrase.split(/\s+/).filter(Boolean);
   if (!words.length || words.length > 4) return [];
   if (/[^\p{L}\s'-]/u.test(phrase)) return [];
+  // Only the whole query. Splitting a name ("Tarique Rahman") into "rahman: a surname"
+  // puts a dictionary card on top of the result it belongs beside.
   try {
     const whole = await defineWord(phrase);
-    if (whole) return [whole];
+    return whole ? [whole] : [];
   } catch {
-    /* try each word */
+    return [];
   }
-  if (words.length < 2) return [];
-  const found = await Promise.all(
-    [...new Set(words.map((word) => word.toLowerCase()))]
-      .filter((word) => word.length > 2)
-      .slice(0, 3)
-      .map((word) => defineWord(word).catch(() => null)),
-  );
-  return found.filter((item): item is WordDefinition => item !== null).slice(0, 2);
 }
 
 async function readDeepDive(query: string, lang: SearchLang | null = null): Promise<string[]> {

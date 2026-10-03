@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type PointerEvent } from "react";
 import { Search } from "lucide-react";
 import { buildPlot, graphSuggestions, parseGraphQuery, type GraphPlot } from "@/lib/graph";
 import { fill, type UiCopy } from "@/lib/ui-copy";
@@ -48,6 +48,15 @@ export function GraphCard({ query, copy, onPick }: { query: string; copy: UiCopy
       <p className="text-base leading-relaxed text-ink">
         <GraphLead template={copy.graphLead} names={names} />
       </p>
+      {plot.series.length > 1 ? (
+        <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+          {plot.series.map((series, index) => (
+            <li key={series.label} className="font-display text-sm italic" style={{ color: COLORS[index % COLORS.length] }}>
+              {series.label}
+            </li>
+          ))}
+        </ul>
+      ) : null}
       <div ref={boxRef} className="mt-3" dir="ltr">
         <GraphSvg plot={plot} width={width} copy={copy} names={names} />
       </div>
@@ -91,6 +100,7 @@ function GraphLead({ template, names }: { template: string; names: string }) {
 
 function GraphSvg({ plot, width, copy, names }: { plot: GraphPlot; width: number; copy: UiCopy; names: string }) {
   const id = useId().replace(/:/g, "");
+  const [hoverX, setHoverX] = useState<number | null>(null);
   const w = Math.max(260, width);
   const h = Math.round(Math.min(440, Math.max(240, w * 0.62)));
   const pad = { left: 14, right: 18, top: 16, bottom: 14 };
@@ -114,54 +124,23 @@ function GraphSvg({ plot, width, copy, names }: { plot: GraphPlot; width: number
       .join(""),
   );
 
-  // Each label goes near the right end of its curve, at the spot (scanning leftwards) that covers
-  // the least: never another label or an axis name if it can help it, then not an axis line, then
-  // as few curve points as possible (its own curve included).
-  type Box = { x1: number; x2: number; y1: number; y2: number };
-  const labelSize = fontSize + 3;
-  const overlaps = (a: Box, b: Box) => a.x1 < b.x2 && b.x1 < a.x2 && a.y1 < b.y2 && b.y1 < a.y2;
-  const blocked: Box[] = [
-    { x1: w - pad.right - 28, x2: w, y1: axisY - 9 - labelSize, y2: axisY + 2 },
-    { x1: axisX, x2: axisX + 22, y1: 0, y2: pad.top + 10 },
-  ];
-  const axes: Box[] = [
-    { x1: 0, x2: w, y1: axisY - 1, y2: axisY + 1 },
-    { x1: axisX - 1, x2: axisX + 1, y1: 0, y2: h },
-  ];
-  const pixelPaths = plot.series.map((series) =>
-    series.segments.flat().flatMap((point) => (point.y >= yMin && point.y <= yMax ? [{ x: sx(point.x), y: sy(point.y) }] : [])),
-  );
-  const curvePoints = (box: Box) =>
-    pixelPaths.reduce(
-      (sum, points) => sum + points.filter((point) => point.x >= box.x1 && point.x <= box.x2 && point.y >= box.y1 - 2 && point.y <= box.y2 + 2).length,
-      0,
-    );
-  const labels: Array<{ index: number; label: string; x: number; y: number }> = [];
-  plot.series.forEach((series, index) => {
-    const points = pixelPaths[index]!;
-    if (!points.length) return;
-    const width = series.label.length * labelSize * 0.52;
-    let best: { x: number; y: number; box: Box; score: number } | null = null;
-    for (let i = points.length - 1; i >= 0 && best?.score !== 0; i -= 4) {
-      const point = points[i]!;
-      const x = Math.min(point.x, w - pad.right - 4);
-      if (x - width < pad.left + 4) break;
-      for (const y of [point.y - 8, point.y + labelSize + 6]) {
-        if (y - labelSize < pad.top || y > h - pad.bottom - 2) continue;
-        // Bottom includes descenders: parentheses and italic letters dip below the baseline.
-        const box = { x1: x - width, x2: x, y1: y - labelSize, y2: y + 5 };
-        const score =
-          blocked.filter((other) => overlaps(box, other)).length * 1000 +
-          axes.filter((other) => overlaps(box, other)).length * 40 +
-          curvePoints(box);
-        if (!best || score < best.score) best = { x, y, box, score };
-        if (score === 0) break;
+  const hover = hoverX == null ? null : plot.series.map((series) => {
+    let best: { x: number; y: number } | null = null;
+    for (const segment of series.segments) {
+      for (const point of segment) {
+        if (!best || Math.abs(point.x - hoverX) < Math.abs(best.x - hoverX)) best = point;
       }
     }
-    if (!best) return;
-    blocked.push(best.box);
-    labels.push({ index, label: series.label, x: best.x, y: best.y });
+    return best;
   });
+
+  function movePointer(event: PointerEvent<SVGSVGElement>) {
+    const rect = event.currentTarget.getBoundingClientRect();
+    if (rect.width <= 0) return;
+    const px = ((event.clientX - rect.left) / rect.width) * w;
+    const x = xMin + ((px - pad.left) / (w - pad.left - pad.right)) * (xMax - xMin);
+    setHoverX(x >= xMin && x <= xMax ? x : null);
+  }
 
   const desc = fill(copy.graphRange, {
     xMin: formatTick(xMin, 3),
@@ -177,8 +156,10 @@ function GraphSvg({ plot, width, copy, names }: { plot: GraphPlot; width: number
       width="100%"
       height={h}
       viewBox={`0 0 ${w} ${h}`}
-      className="block rounded-2xl bg-[color-mix(in_srgb,var(--color-accent-soft)_35%,var(--color-surface))]"
+      className="block touch-none rounded-2xl bg-[color-mix(in_srgb,var(--color-accent-soft)_35%,var(--color-surface))]"
       style={{ fontFamily: "var(--font-display)" }}
+      onPointerMove={movePointer}
+      onPointerLeave={() => setHoverX(null)}
     >
       <title id={`${id}-title`}>{fill(copy.graphFigure, { fns: names })}</title>
       <desc id={`${id}-desc`}>{desc}</desc>
@@ -245,20 +226,32 @@ function GraphSvg({ plot, width, copy, names }: { plot: GraphPlot; width: number
         ))}
       </g>
 
-      <g fontSize={fontSize + 3} fontStyle="italic" textAnchor="end">
-        {labels.map((label) => (
-          <text
-            key={label.label + label.index}
-            x={label.x}
-            y={label.y}
-            fill={COLORS[label.index % COLORS.length]}
-            stroke="var(--color-surface)"
-            strokeWidth="4"
-            paintOrder="stroke"
-          >
-            {label.label}
-          </text>
-        ))}
+      <g fontSize={fontSize + 1} fontStyle="italic">
+        {hover && hoverX != null
+          ? hover.map((point, index) => {
+              if (!point || point.y < yMin || point.y > yMax) return null;
+              const px = sx(point.x);
+              const py = sy(point.y);
+              const boxW = 78;
+              const boxH = 34;
+              const left = px + 12 + boxW > w - 4;
+              const bx = left ? px - 12 - boxW : px + 12;
+              const by = Math.min(Math.max(pad.top, py - boxH - 8), h - pad.bottom - boxH);
+              return (
+                <g key={plot.series[index]!.label}>
+                  <line x1={px} x2={px} y1={pad.top} y2={h - pad.bottom} stroke="var(--color-muted)" strokeDasharray="3 3" />
+                  <circle cx={px} cy={py} r="3.5" fill={COLORS[index % COLORS.length]} />
+                  <rect x={bx} y={by} width={boxW} height={boxH} rx="8" fill="var(--color-surface)" stroke="var(--color-line)" />
+                  <text x={bx + 8} y={by + 14} fill="var(--color-muted)">
+                    x = {formatTick(point.x, 3)}
+                  </text>
+                  <text x={bx + 8} y={by + 28} fill={COLORS[index % COLORS.length]}>
+                    y = {formatTick(point.y, 3)}
+                  </text>
+                </g>
+              );
+            })
+          : null}
       </g>
     </svg>
   );

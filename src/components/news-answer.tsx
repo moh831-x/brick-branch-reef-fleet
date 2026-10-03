@@ -68,24 +68,29 @@ export function Favicon({ url, size = 14 }: { url: string; size?: number }) {
  * The source chip at the end of a point: the first source's icon and name, "+N" when more sources
  * back it. It opens the first source; the others are named in its tooltip and in the source list.
  */
-export function SourceChip({ cites, lang }: { cites: AiCitation[]; lang: UiLang }) {
+export function SourceChip({ cites, lang, onOpen }: { cites: AiCitation[]; lang: UiLang; onOpen?: (cite: AiCitation) => void }) {
   const first = cites[0];
   if (!first) return null;
   const names = cites.map((cite) => publisherName(cite.url, cite.site));
   const label = newsCopy(lang).sources.replace("{names}", cites.map((cite, index) => `${names[index]} — ${cite.title}`).join("; "));
-  return (
-    <a
-      href={first.url}
-      target="_blank"
-      rel="noreferrer"
-      {...selectSafeLink}
-      title={label}
-      aria-label={label}
-      className="ms-1 inline-flex max-w-44 translate-y-[-1px] items-center gap-1 rounded-full bg-line/70 px-1.5 py-0.5 align-middle text-[0.7rem] leading-4 font-medium text-muted no-underline hover:bg-accent-soft hover:text-ink"
-    >
+  const body = (
+    <>
       <Favicon url={first.url} size={12} />
       <span dir="auto" className="min-w-0 truncate">{names[0]}</span>
       {cites.length > 1 ? <span className="shrink-0 tabular-nums">+{cites.length - 1}</span> : null}
+    </>
+  );
+  const className = "ms-1 inline-flex max-w-44 translate-y-[-1px] items-center gap-1 rounded-full bg-line/70 px-1.5 py-0.5 align-middle text-[0.7rem] leading-4 font-medium text-muted no-underline hover:bg-accent-soft hover:text-ink";
+  if (onOpen) {
+    return (
+      <button type="button" onClick={() => onOpen(first)} title={label} aria-label={label} className={className}>
+        {body}
+      </button>
+    );
+  }
+  return (
+    <a href={first.url} target="_blank" rel="noreferrer" {...selectSafeLink} title={label} aria-label={label} className={className}>
+      {body}
     </a>
   );
 }

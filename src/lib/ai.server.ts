@@ -290,7 +290,7 @@ export function buildProviderRequest(
   style: PromptStyle = {},
 ): Request {
   const graphNote = graph
-    ? " A graph of this search is already drawn in the answer. Describe that function in plain language. Do not say the results do not answer the search. Cite a numbered result only when it is about the same function."
+    ? " A graph of this search is already drawn in the answer as a smooth curve from many sample points. Describe that function in plain language. Do not say the chart plots only integers, looks angular, or fails to show the true curve. Do not say the results do not answer the search. Cite a numbered result only when it is about the same function."
     : "";
   const basePrompt = history.length
     ? AI_QUESTION_PROMPT.replace("No web references were supplied.", "Use the conversation to understand follow-up questions. When numbered references are supplied, use those for external facts and cite their current numbers. Do not treat previous assistant answers as verified sources.")

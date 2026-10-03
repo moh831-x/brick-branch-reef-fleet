@@ -144,9 +144,9 @@ const en: UiCopy = {
   trending: "Trending now",
   recent: "Recent",
   clear: "Clear",
-  h1: "Search the web, Wikipedia, and Grokipedia",
+  h1: "Search the Web, Wikipedia, and Grokipedia",
   blurb:
-    "Search the web with Folio by Zip1. Explore web results and optional Wikipedia and Grokipedia sources from one simple search interface.",
+    "Search the Web with Folio by Zip1. Explore web results and optional Wikipedia and Grokipedia sources from one simple search interface.",
   howTitle: "How Folio works",
   how1:
     "Type a query in the search bar and press the search button. The model menu in that bar chooses which model writes the short AI answer. Every search includes that answer, with numbered links to the results it used. The answer can be wrong or leave things out, so the lists under it are there to check.",
