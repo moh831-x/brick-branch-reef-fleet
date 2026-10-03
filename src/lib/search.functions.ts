@@ -1,3 +1,4 @@
+import { CHAT_INPUT_MAX, cleanChatHistory } from "./chat.shared";
 import { createServerFn } from "@tanstack/react-start";
 import { GROK_PAGE, IMAGES_PAGE, MAX_PAGE, PAGE, WEB_PAGE } from "./search.shared";
 import { AI_MAX_CONTEXT, aiChoiceOf, cleanContextItem, type AiAnswer, type AiContextItem, type AiModelStatus } from "./ai.shared";
@@ -68,7 +69,7 @@ export const answerWithAi = createServerFn({ method: "POST" })
   .validator((input: unknown) => {
     if (typeof input !== "object" || input === null) throw new Error("Invalid answer request");
     const raw = input as Record<string, unknown>;
-    const q = typeof raw.q === "string" ? raw.q.replace(/\s+/g, " ").trim().slice(0, 180) : "";
+    const q = typeof raw.q === "string" ? raw.q.trim().slice(0, CHAT_INPUT_MAX) : "";
     if (!q) throw new Error("Enter a search");
     const context: AiContextItem[] = [];
     const seen = new Set<string>();
@@ -79,12 +80,12 @@ export const answerWithAi = createServerFn({ method: "POST" })
       context.push(clean);
     }
     const requested = matchLang(typeof raw.lang === "string" ? raw.lang : "");
-    return { q, context, model: aiChoiceOf(raw.model), ...(requested ? { lang: requested } : {}) };
+    return { q, context, history: cleanChatHistory(raw.history), model: aiChoiceOf(raw.model), ...(requested ? { lang: requested } : {}) };
   })
   .handler(async ({ data }): Promise<AiAnswer> => {
     // The answer is always written in the page language, English included.
     const lang = data.lang ?? (await preferredLang());
-    return runAiAnswer(data.q, data.context, data.model, { answerLanguage: languageName(lang) });
+    return runAiAnswer(data.q, data.context, data.model, { answerLanguage: languageName(lang), history: data.history });
   });
 
 /** Which AI models can run with the keys on the server, for the model menu. No keys are returned. */

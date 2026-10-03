@@ -1,3 +1,4 @@
+import { cleanChatHistory, type ChatMessage } from "./chat.shared.ts";
 /**
  * Server-only providers for the optional AI answer. Keys are read from the server environment
  * and never reach the browser.
@@ -267,13 +268,16 @@ export function buildProviderRequest(
   context: AiContextItem[],
   language?: string,
   graph?: string,
+  history: ChatMessage[] = [],
 ): Request {
   const graphNote = graph
     ? " A graph of this search is already drawn in the answer. Describe that function in plain language. Do not say the results do not answer the search. Cite a numbered result only when it is about the same function."
     : "";
-  const basePrompt = context.length ? AI_SYSTEM_PROMPT : AI_QUESTION_PROMPT;
+  const basePrompt = history.length
+    ? AI_QUESTION_PROMPT.replace("No web references were supplied.", "Use the conversation to understand follow-up questions. When numbered references are supplied, use those for external facts and cite their current numbers. Do not treat previous assistant answers as verified sources.")
+    : context.length ? AI_SYSTEM_PROMPT : AI_QUESTION_PROMPT;
+  const messages = [...cleanChatHistory(history), { role: "user", content: buildAiPrompt(query, context, language, graph) }];
   const system = `${language ? `${basePrompt} Write the entire answer in ${language}, even when the results are in another language.` : basePrompt}${graphNote}`;
-  const prompt = buildAiPrompt(query, context, language, graph);
   if (config.api === "anthropic") {
     return {
       url: `${config.baseUrl}/messages`,
@@ -288,7 +292,7 @@ export function buildProviderRequest(
           model: config.model,
           max_tokens: outputBudget(config),
           system,
-          messages: [{ role: "user", content: prompt }],
+          messages,
           ...(config.effort ? { output_config: { effort: config.effort } } : {}),
         }),
       },
@@ -306,7 +310,7 @@ export function buildProviderRequest(
           // "system" works on xAI, OpenAI (treated as developer instructions on reasoning models), and
           // other OpenAI-compatible endpoints.
           { role: "system", content: system },
-          { role: "user", content: prompt },
+          ...messages,
         ],
         // The AI Gateway documents `max_tokens` and maps it per provider (to max_completion_tokens for
         // OpenAI reasoning models). OpenAI itself rejects temperature and max_tokens on reasoning
@@ -757,8 +761,9 @@ async function askProvider(
   language?: string,
   limits: { timeoutMs?: number; signal?: AbortSignal } = {},
   graph?: string,
+  history: ChatMessage[] = [],
 ) {
-  const request = buildProviderRequest(config, query, context, language, graph);
+  const request = buildProviderRequest(config, query, context, language, graph, history);
   const timeout = AbortSignal.timeout(limits.timeoutMs ?? timeoutFor(config));
   const signal = limits.signal ? AbortSignal.any([timeout, limits.signal]) : timeout;
   const response = await fetcher(request.url, { ...request.init, signal });
@@ -792,7 +797,7 @@ export async function runAiAnswer(
   query: string,
   context: AiContextItem[],
   preferred?: string,
-  options: { env?: Env; fetcher?: typeof fetch; answerLanguage?: string; totalMs?: number; hedgeMs?: number; minCallMs?: number; retryDelayMs?: number } = {},
+  options: { history?: ChatMessage[]; env?: Env; fetcher?: typeof fetch; answerLanguage?: string; totalMs?: number; hedgeMs?: number; minCallMs?: number; retryDelayMs?: number } = {},
 ): Promise<AiAnswer> {
   const env = options.env ?? process.env;
   const fetcher = options.fetcher ?? fetch;
@@ -853,7 +858,7 @@ export async function runAiAnswer(
       for (;;) {
         const timeoutMs = Math.min(timeoutFor(config), remaining());
         try {
-          const answer = await askProvider(config, query, context, fetcher, options.answerLanguage, { timeoutMs, signal: stop }, graph ?? undefined);
+          const answer = await askProvider(config, query, context, fetcher, options.answerLanguage, { timeoutMs, signal: stop }, graph ?? undefined, options.history);
           return { ...answer, config };
         } catch (error) {
           if (stop?.aborted) return null;

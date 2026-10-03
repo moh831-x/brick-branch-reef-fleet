@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useId, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
-import { ArrowUp, ArrowUpRight, BookOpen, ChevronDown, ChevronLeft, ChevronRight, Clock, Compass, Globe, ImageIcon, Pause, Play, RotateCw, Search, Share, Sparkles, Square, TrendingUp, Volume2, X } from "lucide-react";
+import { ArrowUp, ArrowUpRight, Check, Copy, MessageSquare, BookOpen, ChevronDown, ChevronLeft, ChevronRight, Clock, Compass, Globe, ImageIcon, Pause, Play, RotateCw, Search, Share, Sparkles, Square, TrendingUp, Volume2, X } from "lucide-react";
 import type { FolioSearch } from "@/routes/index";
 import {
   answerWithAi,
@@ -32,12 +32,15 @@ import {
   aiProviderLabel,
   pickAiContext,
   selectedAiModel,
+  type AiContextItem,
   type AiAnswer,
   type AiModelStatus,
   type AiPart,
 } from "@/lib/ai.shared";
 import { SiteFooter } from "@/components/site-footer";
 import { fill, sourceLabel, type UiCopy } from "@/lib/ui-copy";
+import { chatCopy } from "@/lib/chat-copy";
+import { CHAT_INPUT_MAX, type ChatMessage } from "@/lib/chat.shared";
 import { questionCopy } from "@/lib/question-copy";
 import { AnswerCode } from "@/components/answer-code";
 import { AnswerImage } from "@/components/answer-image";
@@ -656,6 +659,14 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
           <p className="mt-4 max-w-xl text-center text-sm leading-relaxed text-muted">
             {copy.blurb}
           </p>
+          <button type="button" onClick={() => {
+            const next = { web: false, wiki: false, grok: false, images: false, ai: true };
+            persistSources(next);
+            if (draft.trim()) go(draft, next);
+            else inputRef.current?.focus();
+          }} className="mt-4 inline-flex min-h-11 items-center gap-2 rounded-full border border-line bg-surface px-4 text-sm text-accent hover:bg-accent-soft">
+            <MessageSquare className="size-4" aria-hidden="true" />{chatCopy(uiLang).start}
+          </button>
           {!anySource ? (
             <div className="mt-4 w-full max-w-xl">
               <p className="mb-2 text-sm text-accent">{questionCopy(uiLang).noSources}</p>
@@ -1404,7 +1415,9 @@ function AiAnswerCard({
           </>
         )}
       </div>
+      {answer?.status === "ok" ? <AnswerCopy text={answer.text} lang={lang} /> : null}
       <AnswerImage key={normalized} query={query} answer={answer?.status === "ok" ? answer.text : undefined} lang={lang} />
+      {answer?.status === "ok" ? <ChatFollowUps key={key} query={query} initial={answer} context={pickAiContext({ web: sources.web ? data?.web : undefined, wiki: sources.wiki ? data?.wiki : undefined, grok: sources.grok ? data?.grok : undefined, images: sources.images ? data?.images : undefined })} model={selected} lang={lang} copy={copy} /> : null}
     </section>
   );
 }
@@ -2789,4 +2802,88 @@ function Skeleton() {
       <div className="h-20 rounded-2xl bg-line" />
     </div>
   );
+}
+
+function AnswerCopy({ text, lang }: { text: string; lang: UiLang }) {
+  const [copied, setCopied] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  const labels = chatCopy(lang);
+  async function copyAnswer() {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true); setFailed(false);
+      clearTimeout(timer.current);
+      timer.current = setTimeout(() => setCopied(false), 2000);
+    } catch { setFailed(true); }
+  }
+  return <div className="mt-2"><button type="button" onClick={copyAnswer} className="inline-flex min-h-11 items-center gap-2 rounded-full px-3 text-xs text-muted hover:text-accent focus-visible:outline-2 focus-visible:outline-accent">
+    {copied ? <Check className="size-4" aria-hidden="true" /> : <Copy className="size-4" aria-hidden="true" />}<span aria-live="polite">{copied ? labels.copied : labels.copy}</span>
+  </button>{failed ? <p role="status" className="text-xs text-muted">{copyFailure[lang]}</p> : null}</div>;
+}
+const copyFailure: Record<UiLang, string> = {
+  "en-US": "Could not copy. Select the answer to copy it.", "bn-BD": "কপি করা যায়নি। উত্তর নির্বাচন করে কপি করুন।", "hi-IN": "कॉपी नहीं हुआ। उत्तर चुनकर कॉपी करें।", "ar-SA": "تعذر النسخ. حدد الإجابة لنسخها.", "es-ES": "No se pudo copiar. Selecciona la respuesta para copiarla.", "fr-FR": "Copie impossible. Sélectionnez la réponse pour la copier.", "zh-CN": "无法复制，请选中回答复制。", "ja-JP": "コピーできません。回答を選択してコピーしてください。", "pt-BR": "Não foi possível copiar. Selecione a resposta para copiá-la.", "de-DE": "Kopieren fehlgeschlagen. Wähle die Antwort zum Kopieren aus.",
+};
+
+type ChatTurn = { question: string; answer: AiAnswer | null };
+function ChatFollowUps({ query, initial, context, model, lang, copy }: {
+  query: string; initial: Extract<AiAnswer, { status: "ok" }>;
+  context: AiContextItem[];
+  model?: string; lang: UiLang; copy: UiCopy;
+}) {
+  const [turns, setTurns] = useState<ChatTurn[]>([]);
+  const [draft, setDraft] = useState("");
+  const inFlight = useRef(false);
+  const alive = useRef(true);
+  const end = useRef<HTMLDivElement>(null);
+  const composer = useRef<HTMLTextAreaElement>(null);
+  const labels = chatCopy(lang);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+  const pending = turns.some(turn => turn.answer === null);
+  useEffect(() => { if (turns.length) end.current?.scrollIntoView({ behavior: "auto", block: "nearest" }); }, [turns]);
+  async function ask(question: string, previous: ChatTurn[]) {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    const history: ChatMessage[] = [{ role: "user", content: query }, { role: "assistant", content: initial.text }];
+    for (const turn of previous) if (turn.answer?.status === "ok") history.push({ role: "user", content: turn.question }, { role: "assistant", content: turn.answer.text });
+    setTurns([...previous, { question, answer: null }]);
+    try {
+      const answer = await answerWithAi({ data: { q: question, history, context, model, lang } });
+      if (alive.current) setTurns([...previous, { question, answer }]);
+    } catch {
+      if (alive.current) setTurns([...previous, { question, answer: { status: "error", message: AI_MESSAGES.error } }]);
+    } finally { inFlight.current = false; }
+  }
+  function submit(event: FormEvent) {
+    event.preventDefault();
+    const question = draft.trim();
+    if (!question || pending || inFlight.current) return;
+    setDraft("");
+    void ask(question, turns);
+  }
+  return <div className="mt-4 border-t border-line pt-4">
+    <div className="mb-4 flex items-center justify-between gap-3"><h3 className="inline-flex items-center gap-2 text-sm font-medium"><MessageSquare className="size-4 text-accent" aria-hidden="true" />{labels.title}</h3>
+      <Link to="/" search={{ q: "", near: "" }} className="inline-flex min-h-11 items-center rounded-full px-3 text-xs text-muted hover:text-accent">{labels.newChat}</Link>
+    </div>
+    <div className="grid min-w-0 gap-5" aria-live="polite" aria-busy={pending}>
+      {turns.map((turn, index) => <div key={index} className="min-w-0">
+        <div className="mb-4 ms-auto w-fit max-w-full whitespace-pre-wrap break-words rounded-2xl bg-accent-soft px-4 py-3 text-sm text-ink">{turn.question}</div>
+        {turn.answer === null ? <p className="text-sm text-muted">{questionCopy(lang).writing}</p> : turn.answer.status === "ok" ? <>
+          <div className="min-w-0 text-base leading-relaxed"><AiText parts={turn.answer.parts} citations={turn.answer.citations} copy={copy} lang={lang} /></div>
+          <ReadAloud resetKey={`${index}:${turn.question}`} lang={lang} ready copy={copy} label={copy.listenAnswer} text={turn.answer.parts.map(part => "text" in part ? part.text : " ").join("")} />
+          <AnswerCopy text={turn.answer.text} lang={lang} />
+          <p className="mt-2 text-xs text-muted">{fill(context.length ? copy.writtenBy : questionCopy(lang).writtenBy, { provider: aiProviderLabel(turn.answer.provider), model: turn.answer.model })}</p>
+        </> : <div className="flex flex-wrap items-center gap-3"><p role="status" className="text-sm text-muted">{turn.answer.status === "unconfigured" ? copy.aiUnconfigured : copy.aiError}</p><button type="button" disabled={pending} onClick={() => void ask(turn.question, turns.slice(0, index))} className="min-h-11 rounded-full border border-line px-4 text-sm">{copy.tryAgain}</button></div>}
+      </div>)}
+    </div>
+    <div ref={end} />
+    <form onSubmit={submit} className="mt-5 rounded-2xl border border-line bg-bg p-3">
+      <textarea ref={composer} value={draft} onChange={event => setDraft(event.target.value)} maxLength={CHAT_INPUT_MAX} rows={3} aria-label={labels.placeholder} placeholder={labels.placeholder} onKeyDown={event => {
+        if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); }
+      }} className="block w-full resize-y bg-transparent text-sm leading-relaxed text-ink placeholder:text-muted focus:outline-none" />
+      <div className="mt-2 flex items-center justify-between gap-3"><span className="text-xs text-muted tabular-nums">{draft.length} / {CHAT_INPUT_MAX}</span><button type="submit" disabled={pending || !draft.trim()} aria-label={labels.send} className="inline-flex min-h-11 items-center gap-2 rounded-full bg-ink px-4 text-sm text-bg disabled:opacity-40"><span>{labels.send}</span><ArrowUp className="size-4" aria-hidden="true" /></button></div>
+    </form>
+    <p className="mt-2 text-xs leading-relaxed text-muted">{labels.privacy}</p>
+  </div>;
 }

@@ -566,3 +566,29 @@ describe("direct questions without references", () => {
     assert.match((sent.messages as { content: string }[])[0].content, /Use only the numbered search results/);
   });
 });
+
+describe("conversational provider requests", () => {
+  it("sends prior user and assistant turns to each provider before the new question", () => {
+    const history = [{ role: "user" as const, content: "My name is Sam" }, { role: "assistant" as const, content: "Hello Sam" }];
+    for (const provider of ["grok", "openai", "claude"] as const) {
+      const request = buildProviderRequest(readProviderConfig(provider, ALL)!, "What is my name?", [], "English", undefined, history);
+      const payload = body(request.init);
+      const messages = payload.messages as { role: string; content: string }[];
+      const offset = provider === "claude" ? 0 : 1;
+      assert.deepEqual(messages.slice(offset, offset + 2), history);
+      assert.ok(messages.at(-1)?.content.includes("What is my name?"));
+      const system = String(provider === "claude" ? payload.system : messages[0].content);
+      assert.ok(system.includes("Use the conversation"));
+    }
+  });
+});
+
+it("runAiAnswer carries conversation history into the actual provider request", async () => {
+  const { fetcher, calls } = fakeFetch();
+  const history = [{ role: "user" as const, content: "Remember the number 27." }, { role: "assistant" as const, content: "I will remember 27." }];
+  const result = await runAiAnswer("Double that number.", [], "grok-4.3", { env: { XAI_API_KEY: "x-key" }, fetcher, history });
+  assert.equal(result.status, "ok");
+  const messages = calls[0].body.messages as { role: string; content: string }[];
+  assert.deepEqual(messages.slice(1, 3), history);
+  assert.ok(messages.at(-1)?.content.includes("Double that number."));
+});
