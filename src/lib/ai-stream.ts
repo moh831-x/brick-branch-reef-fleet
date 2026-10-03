@@ -3,12 +3,14 @@
  * each one to `onEvent`, then returns the answer. When the stream route cannot be reached (an old
  * deployment, a proxy that rejects it), it says so with StreamUnavailable before anything was
  * read, so the caller can ask the plain server function instead; the question is never sent twice.
- * A clarifying-question line is put back on the answer it precedes.
+ * A clarifying-question line is put back on the answer it precedes. Research lines (the searches
+ * behind the answer, and the notes between them) go to `onResearch` as they arrive.
  */
 import { AI_STREAM_PATH, AI_STREAM_TYPE, parseStreamLine, splitLines, type AiProgressEvent } from "./ai-progress.ts";
 import type { AiAnswer, AiContextItem } from "./ai.shared.ts";
 import type { ChatMessage } from "./chat.shared.ts";
 import type { AiQuestion } from "./ai-clarify.ts";
+import type { ResearchItem } from "./research.shared.ts";
 
 export class StreamUnavailable extends Error {
   constructor(reason: string) {
@@ -17,9 +19,23 @@ export class StreamUnavailable extends Error {
   }
 }
 
-export type AnswerBody = { q: string; context: AiContextItem[]; history?: ChatMessage[]; model?: string; lang?: string; tz?: string };
+export type AnswerBody = {
+  q: string;
+  context: AiContextItem[];
+  history?: ChatMessage[];
+  model?: string;
+  lang?: string;
+  tz?: string;
+  /** Web search is on: the server may search again when the results are weak. */
+  web?: boolean;
+};
 
-export async function readAnswerStream(body: AnswerBody, onEvent: (event: AiProgressEvent) => void, fetcher: typeof fetch = fetch): Promise<AiAnswer> {
+export async function readAnswerStream(
+  body: AnswerBody,
+  onEvent: (event: AiProgressEvent) => void,
+  fetcher: typeof fetch = fetch,
+  onResearch?: (item: ResearchItem) => void,
+): Promise<AiAnswer> {
   let response: Response;
   try {
     response = await fetcher(AI_STREAM_PATH, {
@@ -49,6 +65,10 @@ export async function readAnswerStream(body: AnswerBody, onEvent: (event: AiProg
       if (!parsed) continue;
       if (parsed.type === "question") {
         question = parsed.question;
+        continue;
+      }
+      if (parsed.type === "research") {
+        onResearch?.(parsed.item);
         continue;
       }
       if (parsed.type === "answer") {

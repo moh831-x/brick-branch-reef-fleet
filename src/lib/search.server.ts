@@ -1,7 +1,8 @@
 import { GROK_PAGE, IMAGES_MAX_PAGE, IMAGES_PAGE, isLatinQuery, PAGE, relevantCount, WEB_PAGE } from "./search.shared";
 import { LANGS, langInfo, matchLang, wikiOrigin as wikiOriginFor, type UiLang } from "./i18n";
 import { extractReadable, isPrivateHost, pageCharset, type ReaderPage } from "./reader";
-import { isNewsQuery, parseBingNews } from "./news.shared";
+import { isNewsQuery, parseBingNews, shortDate } from "./news.shared";
+import { cleanContextItem, type AiContextItem } from "./ai.shared";
 
 export type SourceId = "web" | "wiki" | "grok" | "images";
 
@@ -367,7 +368,7 @@ function readBingTotal(html: string): number | undefined {
   return total;
 }
 
-async function searchWeb(query: string, offset: number, near: string, lang: SearchLang | null): Promise<SourceBlock> {
+async function searchWeb(query: string, offset: number, near: string, lang: SearchLang | null, withTotal = true): Promise<SourceBlock> {
   const first = Math.max(1, offset + 1);
   const q = near ? `${query} ${near}` : query;
   const market = bingLang(lang);
@@ -375,7 +376,7 @@ async function searchWeb(query: string, offset: number, near: string, lang: Sear
   const htmlUrl = `https://www.bing.com/search?q=${encodeURIComponent(q)}&count=${WEB_PAGE}${market}`;
   const [xml, html] = await Promise.all([
     getText(rssUrl, "application/rss+xml, application/xml, text/xml"),
-    getText(htmlUrl, "text/html").catch(() => ""),
+    withTotal ? getText(htmlUrl, "text/html").catch(() => "") : Promise.resolve(""),
   ]);
   const items = [...xml.matchAll(/<item>([\s\S]*?)<\/item>/gi)];
   const results: SearchHit[] = [];
@@ -409,6 +410,44 @@ async function searchNews(query: string, lang: SearchLang | null): Promise<Sourc
   const url = `https://www.bing.com/news/search?q=${encodeURIComponent(query)}&format=rss${bingLang(lang)}`;
   const results = parseBingNews(await getText(url, "application/rss+xml, application/xml, text/xml"));
   return { results, done: true };
+}
+
+/** Results one extra AI search hands the model (agentic search): news articles first, then web pages. */
+const AI_SEARCH_NEWS = 5;
+const AI_SEARCH_MAX = 10;
+
+/**
+ * One extra web search the AI answer asked for because the first results were weak (see
+ * src/lib/research.shared.ts): the same Bing web feed, plus the news feed for a news search, as
+ * AI context items. Throws only when every feed failed, so the step can say so.
+ */
+export async function searchForAi(query: string, options: { news: boolean; signal?: AbortSignal; lang?: string }): Promise<AiContextItem[]> {
+  const lang = asSearchLang(options.lang);
+  const work = Promise.allSettled([
+    searchWeb(query, 0, "", lang, false),
+    options.news ? searchNews(query, lang) : Promise.resolve(emptyBlock()),
+  ]);
+  const stopped = new Promise<never>((_, reject) => {
+    if (options.signal?.aborted) reject(new Error("Search timed out"));
+    options.signal?.addEventListener("abort", () => reject(new Error("Search timed out")), { once: true });
+  });
+  stopped.catch(() => undefined); // A timeout after the search finished is not an error anyone waits on.
+  const [web, news] = await Promise.race([work, stopped]);
+  if (web.status === "rejected" && news.status === "rejected") throw web.reason instanceof Error ? web.reason : new Error("Search failed");
+  const hits = [
+    ...(news.status === "fulfilled" ? news.value.results.slice(0, AI_SEARCH_NEWS) : []),
+    ...(web.status === "fulfilled" ? web.value.results : []),
+  ];
+  const items: AiContextItem[] = [];
+  const seen = new Set<string>();
+  for (const hit of hits) {
+    const item = cleanContextItem({ source: "web", title: hit.title, url: hit.url, snippet: hit.snippet, site: hit.site, date: shortDate(hit.published) });
+    if (!item || seen.has(item.url)) continue;
+    seen.add(item.url);
+    items.push(item);
+    if (items.length >= AI_SEARCH_MAX) break;
+  }
+  return items;
 }
 
 /**

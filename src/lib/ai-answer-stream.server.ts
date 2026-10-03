@@ -2,11 +2,14 @@
  * The AI answer as a stream: one NDJSON line per real stage while the server works (asking a
  * model, a retry, a failure, a fallback, writing the answer), then one line with the answer. The
  * browser shows the stages as a live progress line, then as "Worked for 13s". A request too open to
- * answer gets a `question` line (the clarifying question card) right before the answer line.
+ * answer gets a `question` line (the clarifying question card) right before the answer line. With
+ * web search on, `research` lines show the searches behind the answer as they happen (the page's own
+ * search, a note when the model finds the results weak, the better search it runs, its results).
  */
 import { AI_STREAM_TYPE, type AiStreamLine } from "./ai-progress.ts";
 import { AI_MESSAGES, type AiAnswer } from "./ai.shared.ts";
 import { runAiAnswer } from "./ai.server.ts";
+import { runResearchedAnswer, type ResearchSearchFn } from "./ai-research.server.ts";
 import { readAnswerRequest } from "./ai-request.ts";
 import { LANG_COOKIE, languageName, matchLang, parseAcceptLanguage, pickLang, type UiLang } from "./i18n.ts";
 
@@ -29,7 +32,11 @@ export function requestLang(request: Request): UiLang {
   return matchLang(decoded) ?? pickLang(parseAcceptLanguage(request.headers.get("accept-language"))) ?? "en-US";
 }
 
-export async function streamAiAnswer(request: Request, run: typeof runAiAnswer = runAiAnswer): Promise<Response> {
+/**
+ * `search` runs an extra web search when the model finds the results weak (agentic search); it is
+ * used only when the browser says web search is on. Without it, the answer is a single call.
+ */
+export async function streamAiAnswer(request: Request, run: typeof runAiAnswer = runAiAnswer, search?: ResearchSearchFn): Promise<Response> {
   let input: ReturnType<typeof readAnswerRequest>;
   try {
     input = readAnswerRequest(await request.json());
@@ -51,12 +58,14 @@ export async function streamAiAnswer(request: Request, run: typeof runAiAnswer =
       };
       let answer: AiAnswer;
       try {
-        answer = await run(input.q, input.context, input.model, {
+        answer = await runResearchedAnswer(input.q, input.context, input.model, {
           answerLanguage: languageName(lang),
           history: input.history,
           timeZone: input.tz,
           onProgress: (event) => send({ type: "progress", event }),
           clarify: true,
+          run,
+          ...(search && input.web ? { searchWeb: (query, options) => search(query, { ...options, lang }), followUp: input.history.length > 0, onResearch: (item) => send({ type: "research", item }) } : {}),
         });
       } catch {
         answer = { status: "error", message: AI_MESSAGES.error };

@@ -5,8 +5,13 @@ export const Route = createFileRoute("/api/ai-answer")({
   server: {
     handlers: {
       POST: async ({ request }) => {
-        const { streamAiAnswer } = await import("@/lib/ai-answer-stream.server");
-        return streamAiAnswer(request);
+        const [{ streamAiAnswer }, { runAiAnswer }, { searchForAi }] = await Promise.all([
+          import("@/lib/ai-answer-stream.server"),
+          import("@/lib/ai.server"),
+          import("@/lib/search.server"),
+        ]);
+        // Extra searches (agentic search) use the same web and news feeds as the page.
+        return streamAiAnswer(request, runAiAnswer, searchForAi);
       },
     },
   },

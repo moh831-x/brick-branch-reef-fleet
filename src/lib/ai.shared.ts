@@ -5,6 +5,7 @@
  */
 
 import type { AiQuestion } from "./ai-clarify.ts";
+import type { ResearchItem, SearchRequest } from "./research.shared.ts";
 import { shortDate } from "./news.shared.ts";
 
 export type AiSourceId = "web" | "wiki" | "grok" | "images";
@@ -225,6 +226,10 @@ export type AiAnswer =
       attempts?: AiAttempt[];
       /** Set when the request was too open to answer: `text` is the short note, and the card asks this. */
       question?: AiQuestion;
+      /** The searches behind the answer and the notes between them, in order (see research.shared.ts). */
+      research?: ResearchItem[];
+      /** Server-side only: the model asked for a better search instead of answering. Never sent to the browser. */
+      search?: SearchRequest;
     }
   | {
       status: "unconfigured" | "no-context" | "error";

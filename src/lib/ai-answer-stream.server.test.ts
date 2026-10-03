@@ -4,6 +4,8 @@ import { requestLang, streamAiAnswer } from "./ai-answer-stream.server.ts";
 import { readAnswerStream, StreamUnavailable } from "./ai-stream.ts";
 import type { AiProgressEvent } from "./ai-progress.ts";
 import type { runAiAnswer } from "./ai.server.ts";
+import type { ResearchSearchFn } from "./ai-research.server.ts";
+import type { ResearchItem } from "./research.shared.ts";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -93,5 +95,49 @@ describe("streamed AI answer", () => {
       streamAiAnswer(new Request("http://local/api/ai-answer", { method: "POST", headers: { "content-type": "application/json" }, body: init?.body as string }), clarifyRun)) as typeof fetch;
     const answer = await readAnswerStream({ q: "write a python code", context: [] }, () => {}, fetcher);
     assert.equal(answer.status === "ok" ? answer.question?.options.length : 0, 3);
+  });
+});
+
+describe("streamed agentic search", () => {
+  const context = [{ source: "web", title: "Iran news today", url: "https://farm.example/iran", snippet: "filler" }];
+  const fresh = [{ source: "web" as const, title: "Iran rejects proposal", url: "https://www.reuters.com/world/iran-1", snippet: "Reuters.", site: "Reuters" }];
+  /** Asks for a better search when it may, then answers. */
+  const researchRun = (async (_q, _context, _model, options) => {
+    if (options?.search) {
+      return { status: "ok", text: "Weak.", parts: [{ text: "Weak." }], citations: [], model: "grok-4.3", provider: "grok", failed: [], search: { note: "Those are content farms. Let me try a better search.", query: "Iran Reuters October 2026" } };
+    }
+    return { status: "ok", text: "Better answer.", parts: [{ text: "Better answer." }], citations: [], model: "grok-4.3", provider: "grok", failed: [] };
+  }) as typeof runAiAnswer;
+  const langs: Array<string | undefined> = [];
+  const search: ResearchSearchFn = async (_query, options) => {
+    langs.push(options.lang);
+    return fresh;
+  };
+
+  it("streams each step and note before the answer, only when web search is on", async () => {
+    const text = await (await streamAiAnswer(post({ q: "iran news", context, web: true, lang: "de-DE" }), researchRun, search)).text();
+    const lines = text.trim().split("\n").map((line) => JSON.parse(line));
+    assert.deepEqual(lines.map((line) => (line.type === "research" ? `${line.item.kind}${line.item.status ? `:${line.item.status}` : ""}` : line.type)), ["search:done", "note", "search:searching", "search:done", "answer"]);
+    assert.equal(lines[1].item.text, "Those are content farms. Let me try a better search.");
+    assert.equal(lines[3].item.results[0].url, fresh[0]!.url);
+    const answer = lines.at(-1).answer;
+    assert.equal(answer.text, "Better answer.");
+    assert.equal(answer.search, undefined, "the internal search request never reaches the browser");
+    assert.equal(answer.research.length, 3);
+    assert.deepEqual(langs, ["de-DE"], "the search runs in the page language");
+
+    const off = await (await streamAiAnswer(post({ q: "iran news", context }), researchRun, search)).text();
+    const offLines = off.trim().split("\n").map((line) => JSON.parse(line));
+    assert.deepEqual(offLines.map((line) => line.type), ["answer"], "web off: no extra searches");
+  });
+
+  it("the browser reader hands each step to onResearch and returns the answer with its research", async () => {
+    const fetcher = (async (_url: string | URL | Request, init?: RequestInit) =>
+      streamAiAnswer(new Request("http://local/api/ai-answer", { method: "POST", headers: { "content-type": "application/json" }, body: init?.body as string }), researchRun, search)) as typeof fetch;
+    const steps: ResearchItem[] = [];
+    const answer = await readAnswerStream({ q: "iran news", context: context as never, web: true }, () => {}, fetcher, (item) => steps.push(item));
+    assert.equal(steps.length, 4);
+    assert.ok(answer.status === "ok");
+    assert.deepEqual(answer.research?.map((step) => step.kind), ["search", "note", "search"]);
   });
 });

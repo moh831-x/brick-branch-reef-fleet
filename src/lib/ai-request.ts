@@ -4,7 +4,16 @@ import { CHAT_INPUT_MAX, cleanChatHistory, type ChatMessage } from "./chat.share
 import { matchLang, type UiLang } from "./i18n.ts";
 import { cleanTimeZone } from "./news.shared.ts";
 
-export type AnswerRequest = { q: string; context: AiContextItem[]; history: ChatMessage[]; model?: string; lang?: UiLang; tz?: string };
+export type AnswerRequest = {
+  q: string;
+  context: AiContextItem[];
+  history: ChatMessage[];
+  model?: string;
+  lang?: UiLang;
+  tz?: string;
+  /** Web search is on for this answer, so the server may search again (agentic search). */
+  web?: boolean;
+};
 
 /** Validate and bound everything the browser sent. Throws on a missing question. */
 export function readAnswerRequest(input: unknown): AnswerRequest {
@@ -22,5 +31,13 @@ export function readAnswerRequest(input: unknown): AnswerRequest {
   }
   const requested = matchLang(typeof raw.lang === "string" ? raw.lang : "");
   const tz = cleanTimeZone(raw.tz);
-  return { q, context, history: cleanChatHistory(raw.history), model: aiChoiceOf(raw.model), ...(requested ? { lang: requested } : {}), ...(tz ? { tz } : {}) };
+  return {
+    q,
+    context,
+    history: cleanChatHistory(raw.history),
+    model: aiChoiceOf(raw.model),
+    ...(requested ? { lang: requested } : {}),
+    ...(tz ? { tz } : {}),
+    ...(raw.web === true ? { web: true } : {}),
+  };
 }

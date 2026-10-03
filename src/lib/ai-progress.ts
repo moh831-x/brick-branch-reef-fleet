@@ -7,6 +7,7 @@
  */
 import type { AiAnswer, AiFailureKind, AiSourceId, AnswerProviderId } from "./ai.shared.ts";
 import { cleanQuestion, type AiQuestion } from "./ai-clarify.ts";
+import { cleanResearchItem, type ResearchItem } from "./research.shared.ts";
 
 /** What the server is doing. `at` is milliseconds since the server started on this answer. */
 export type AiProgressEvent =
@@ -23,11 +24,14 @@ export type AiProgressInput = AiProgressEvent extends infer E ? (E extends AiPro
 /**
  * One line of the streamed answer: progress while working, then exactly one answer. When the request
  * was too open, a `question` line (the clarifying question for the card) comes just before the answer,
- * whose text is then the short note. Readers that don't know `question` lines skip them.
+ * whose text is then the short note. `research` lines are the searches behind the answer (each one
+ * when it starts and again with its results) and the model's notes between them. Readers that don't
+ * know `question` or `research` lines skip them.
  */
 export type AiStreamLine =
   | { type: "progress"; event: AiProgressEvent }
   | { type: "question"; question: AiQuestion }
+  | { type: "research"; item: ResearchItem }
   | { type: "answer"; answer: AiAnswer };
 
 export const AI_STREAM_PATH = "/api/ai-answer";
@@ -201,6 +205,10 @@ export function parseStreamLine(line: string): AiStreamLine | null {
   const raw = value as Record<string, unknown>;
   if (raw.type === "answer" && raw.answer && typeof raw.answer === "object" && typeof (raw.answer as { status?: unknown }).status === "string") {
     return { type: "answer", answer: raw.answer as AiAnswer };
+  }
+  if (raw.type === "research") {
+    const item = cleanResearchItem(raw.item);
+    return item ? { type: "research", item } : null;
   }
   if (raw.type === "question") {
     const question = cleanQuestion(raw.question);

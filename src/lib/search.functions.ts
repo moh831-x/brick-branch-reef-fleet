@@ -2,9 +2,10 @@ import { readAnswerRequest } from "./ai-request";
 import { createServerFn } from "@tanstack/react-start";
 import { GROK_PAGE, IMAGES_PAGE, MAX_PAGE, PAGE, WEB_PAGE } from "./search.shared";
 import { type AiAnswer, type AiModelStatus } from "./ai.shared";
-import { aiModelStatus, runAiAnswer, runTranslate } from "./ai.server";
+import { aiModelStatus, runTranslate } from "./ai.server";
+import { runResearchedAnswer } from "./ai-research.server";
 import { LANG_COOKIE, languageName, matchLang, pickLang, parseAcceptLanguage, PREVIEW_TRANSLATE_CHARS, type UiLang } from "./i18n";
-import { SEARCH_LANGS, asSearchLang, runPreview, runSearch, runSuggest, runTrending, type HitPreview, type SearchInput, type SearchPayload, type SourceId, type Suggestion, type Trend } from "./search.server";
+import { SEARCH_LANGS, asSearchLang, runPreview, searchForAi, runSearch, runSuggest, runTrending, type HitPreview, type SearchInput, type SearchPayload, type SourceId, type Suggestion, type Trend } from "./search.server";
 
 export type { HitPreview, ImageRef, LeadCard, PlaceRef, PreviewSection, SearchHit, SearchInput, SearchPayload, SourceBlock, SourceId, Suggestion, Trend, WordDefinition, WordSense } from "./search.server";
 
@@ -72,7 +73,9 @@ export const answerWithAi = createServerFn({ method: "POST" })
   .handler(async ({ data }): Promise<AiAnswer> => {
     // The answer is always written in the page language, English included.
     const lang = data.lang ?? (await preferredLang());
-    return runAiAnswer(data.q, data.context, data.model, { answerLanguage: languageName(lang), history: data.history, clarify: true, timeZone: data.tz });
+    // With web search on, weak results may get a better search first (agentic search, research.shared.ts).
+    const research = data.web ? { searchWeb: (query: string, options: { news: boolean; signal: AbortSignal }) => searchForAi(query, { ...options, lang }), followUp: data.history.length > 0 } : {};
+    return runResearchedAnswer(data.q, data.context, data.model, { answerLanguage: languageName(lang), history: data.history, clarify: true, timeZone: data.tz, ...research });
   });
 
 /** Which AI models can run with the keys on the server, for the model menu. No keys are returned. */
