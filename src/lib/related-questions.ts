@@ -16,10 +16,23 @@ const HEADS: Record<UiLang, string> = {
 
 /** Countries and other places that must not be asked as if they were a person. */
 const COUNTRIES = new Set(
-  "afghanistan|albania|algeria|andorra|angola|argentina|armenia|australia|austria|azerbaijan|bahamas|bahrain|bangladesh|barbados|belarus|belgium|belize|benin|bhutan|bolivia|bosnia|botswana|brazil|brunei|bulgaria|burkina faso|burundi|cambodia|cameroon|canada|cape verde|central african republic|chad|chile|china|colombia|comoros|congo|costa rica|croatia|cuba|cyprus|czechia|czech republic|denmark|djibouti|dominica|dominican republic|ecuador|egypt|el salvador|equatorial guinea|eritrea|estonia|eswatini|ethiopia|fiji|finland|france|gabon|gambia|georgia|germany|ghana|greece|grenada|guatemala|guinea|guinea-bissau|guyana|haiti|honduras|hungary|iceland|india|indonesia|iran|iraq|ireland|israel|italy|ivory coast|jamaica|japan|jordan|kazakhstan|kenya|kiribati|kosovo|kuwait|kyrgyzstan|laos|latvia|lebanon|lesotho|liberia|libya|liechtenstein|lithuania|luxembourg|madagascar|malawi|malaysia|maldives|mali|malta|marshall islands|mauritania|mauritius|mexico|micronesia|moldova|monaco|mongolia|montenegro|morocco|mozambique|myanmar|namibia|nauru|nepal|netherlands|new zealand|nicaragua|niger|nigeria|north korea|north macedonia|norway|oman|pakistan|palau|palestine|panama|papua new guinea|paraguay|peru|philippines|poland|portugal|qatar|romania|russia|rwanda|saint lucia|samoa|san marino|saudi arabia|senegal|serbia|seychelles|sierra leone|singapore|slovakia|slovenia|solomon islands|somalia|south africa|south korea|south sudan|spain|sri lanka|sudan|suriname|sweden|switzerland|syria|taiwan|tajikistan|tanzania|thailand|timor-leste|togo|tonga|trinidad and tobago|tunisia|turkey|turkmenistan|tuvalu|uganda|ukraine|united arab emirates|united kingdom|united states|uruguay|uzbekistan|vanuatu|vatican city|venezuela|vietnam|yemen|zambia|zimbabwe|usa|uk|uae|us|america|england|scotland|wales|britain".split(
+  "afghanistan|albania|algeria|andorra|angola|antigua and barbuda|argentina|armenia|australia|austria|azerbaijan|bahamas|bahrain|bangladesh|barbados|belarus|belgium|belize|benin|bhutan|bolivia|bosnia|bosnia and herzegovina|botswana|brazil|brunei|bulgaria|burkina faso|burundi|cabo verde|cambodia|cameroon|canada|cape verde|central african republic|chad|chile|china|colombia|comoros|congo|costa rica|cote d'ivoire|croatia|cuba|cyprus|czechia|czech republic|democratic republic of the congo|denmark|djibouti|dominica|dominican republic|dr congo|drc|east timor|ecuador|egypt|el salvador|equatorial guinea|eritrea|estonia|eswatini|ethiopia|fiji|finland|france|gabon|gambia|georgia|germany|ghana|greece|greenland|grenada|guatemala|guinea|guinea-bissau|guyana|haiti|holy see|honduras|hong kong|hungary|iceland|india|indonesia|iran|iraq|ireland|israel|italy|ivory coast|jamaica|japan|jordan|kazakhstan|kenya|kiribati|kosovo|kuwait|kyrgyzstan|laos|latvia|lebanon|lesotho|liberia|libya|liechtenstein|lithuania|luxembourg|macao|macau|madagascar|malawi|malaysia|maldives|mali|malta|marshall islands|mauritania|mauritius|mexico|micronesia|moldova|monaco|mongolia|montenegro|morocco|mozambique|myanmar|namibia|nauru|nepal|netherlands|new zealand|nicaragua|niger|nigeria|north korea|north macedonia|norway|oman|pakistan|palau|palestine|panama|papua new guinea|paraguay|peru|philippines|poland|portugal|puerto rico|qatar|romania|russia|rwanda|saint kitts and nevis|saint lucia|saint vincent and the grenadines|samoa|san marino|sao tome and principe|saudi arabia|senegal|serbia|seychelles|sierra leone|singapore|slovakia|slovenia|solomon islands|somalia|south africa|south korea|south sudan|spain|sri lanka|sudan|suriname|swaziland|sweden|switzerland|syria|taiwan|tajikistan|tanzania|thailand|timor-leste|togo|tonga|trinidad and tobago|tunisia|turkey|turkmenistan|tuvalu|uganda|ukraine|united arab emirates|united kingdom|united states|united states of america|uruguay|uzbekistan|vanuatu|vatican city|venezuela|vietnam|yemen|zambia|zimbabwe|usa|uk|uae|us|america|england|scotland|wales|britain|holland|burma|macedonia|republic of korea|prc|dprk".split(
     "|",
   ),
 );
+
+/** Abbreviations read better with their usual capitals. */
+const NAMES: Record<string, string> = {
+  usa: "the USA",
+  us: "the US",
+  uk: "the UK",
+  uae: "the UAE",
+  drc: "the DRC",
+  dprk: "North Korea",
+  prc: "China",
+  "cote d'ivoire": "Côte d'Ivoire",
+  "sao tome and principe": "São Tomé and Príncipe",
+};
 
 const PERSON_RESTS = new Set([
   "wife",
@@ -73,9 +86,9 @@ export function relatedQuestionsTitle(lang: UiLang): string {
 }
 
 function placeKind(query: string, places: readonly string[]): "country" | "place" | null {
-  const key = query.toLowerCase();
+  const key = placeKey(query);
   if (COUNTRIES.has(key)) return "country";
-  const named = places.some((place) => place.trim().toLowerCase() === key);
+  const named = places.some((place) => placeKey(place) === key);
   return named ? "place" : null;
 }
 
@@ -87,7 +100,19 @@ function templatesFor(topic: string, lang: UiLang, kind: "country" | "place" | n
   return person ? aboutPerson(topic, lang) : aboutThing(topic, lang);
 }
 
+function placeKey(query: string): string {
+  return query
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase()
+    .replace(/^the\s+/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function labelTopic(topic: string): string {
+  const named = NAMES[placeKey(topic)];
+  if (named) return named;
   if (topic !== topic.toLowerCase()) return topic;
   const small = new Set(["of", "the", "and", "de", "da", "del", "la", "el", "al"]);
   return topic

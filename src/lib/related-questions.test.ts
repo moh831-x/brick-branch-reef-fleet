@@ -20,6 +20,21 @@ describe("related questions", () => {
     ]);
   });
 
+  it("asks the same place questions for other countries", () => {
+    for (const name of ["japan", "nigeria", "brazil", "south korea", "united states", "côte d'ivoire", "bosnia and herzegovina"]) {
+      const questions = relatedQuestions(name, "en-US");
+      assert.equal(questions[0]?.startsWith("Where is "), true, name);
+      assert.match(questions[1] ?? "", /capital/i, name);
+      assert.equal(
+        questions.some((question) => /^who is/i.test(question)),
+        false,
+        name,
+      );
+    }
+    assert.equal(relatedQuestions("usa", "en-US")[0], "Where is the USA?");
+    assert.equal(relatedQuestions("côte d'ivoire", "en-US")[0], "Where is Côte d'Ivoire?");
+  });
+
   it("asks where a located city is", () => {
     const questions = relatedQuestions("dhaka", "en-US", [], ["Dhaka"]);
     assert.equal(questions[0], "Where is Dhaka?");
