@@ -14,13 +14,48 @@ const HEADS: Record<UiLang, string> = {
   "de-DE": "Verwandte Fragen",
 };
 
+/** Countries and other places that must not be asked as if they were a person. */
+const COUNTRIES = new Set(
+  "afghanistan|albania|algeria|andorra|angola|argentina|armenia|australia|austria|azerbaijan|bahamas|bahrain|bangladesh|barbados|belarus|belgium|belize|benin|bhutan|bolivia|bosnia|botswana|brazil|brunei|bulgaria|burkina faso|burundi|cambodia|cameroon|canada|cape verde|central african republic|chad|chile|china|colombia|comoros|congo|costa rica|croatia|cuba|cyprus|czechia|czech republic|denmark|djibouti|dominica|dominican republic|ecuador|egypt|el salvador|equatorial guinea|eritrea|estonia|eswatini|ethiopia|fiji|finland|france|gabon|gambia|georgia|germany|ghana|greece|grenada|guatemala|guinea|guinea-bissau|guyana|haiti|honduras|hungary|iceland|india|indonesia|iran|iraq|ireland|israel|italy|ivory coast|jamaica|japan|jordan|kazakhstan|kenya|kiribati|kosovo|kuwait|kyrgyzstan|laos|latvia|lebanon|lesotho|liberia|libya|liechtenstein|lithuania|luxembourg|madagascar|malawi|malaysia|maldives|mali|malta|marshall islands|mauritania|mauritius|mexico|micronesia|moldova|monaco|mongolia|montenegro|morocco|mozambique|myanmar|namibia|nauru|nepal|netherlands|new zealand|nicaragua|niger|nigeria|north korea|north macedonia|norway|oman|pakistan|palau|palestine|panama|papua new guinea|paraguay|peru|philippines|poland|portugal|qatar|romania|russia|rwanda|saint lucia|samoa|san marino|saudi arabia|senegal|serbia|seychelles|sierra leone|singapore|slovakia|slovenia|solomon islands|somalia|south africa|south korea|south sudan|spain|sri lanka|sudan|suriname|sweden|switzerland|syria|taiwan|tajikistan|tanzania|thailand|timor-leste|togo|tonga|trinidad and tobago|tunisia|turkey|turkmenistan|tuvalu|uganda|ukraine|united arab emirates|united kingdom|united states|uruguay|uzbekistan|vanuatu|vatican city|venezuela|vietnam|yemen|zambia|zimbabwe|usa|uk|uae|us|america|england|scotland|wales|britain".split(
+    "|",
+  ),
+);
+
+const PERSON_RESTS = new Set([
+  "wife",
+  "husband",
+  "spouse",
+  "age",
+  "birthday",
+  "born",
+  "net worth",
+  "family",
+  "children",
+  "son",
+  "daughter",
+  "death",
+  "died",
+  "height",
+]);
+
 /** Three questions about this search, in the page language. Empty for a graph, which already has its own suggestions. */
-export function relatedQuestions(query: string, lang: UiLang, dives: readonly string[] = []): string[] {
-  const topic = query.replace(/\s+/g, " ").trim();
-  if (topic.length < 2 || parseGraphQuery(topic)) return [];
-  const asked = /^(who|what|when|where|why|how|which|is|are|did|does|do|can|was|were)\b/i.test(topic) || topic.endsWith("?");
-  const fromDives = asked ? [] : dives.map((dive) => questionFromDive(topic, dive)).filter((item): item is string => Boolean(item));
-  const templates = asked ? moreAbout(topic, lang) : aboutTopic(topic, lang);
+export function relatedQuestions(
+  query: string,
+  lang: UiLang,
+  dives: readonly string[] = [],
+  places: readonly string[] = [],
+): string[] {
+  const raw = query.replace(/\s+/g, " ").trim();
+  if (raw.length < 2 || parseGraphQuery(raw)) return [];
+  const topic = labelTopic(raw);
+  const kind = placeKind(raw, places);
+  const asked = /^(who|what|when|where|why|how|which|is|are|did|does|do|can|was|were)\b/i.test(raw) || raw.endsWith("?");
+  const fromDives = asked
+    ? []
+    : dives
+        .map((dive) => questionFromDive(topic, raw, dive, kind !== null))
+        .filter((item): item is string => Boolean(item));
+  const templates = asked ? moreAbout(topic, lang) : templatesFor(topic, lang, kind, raw);
   const seen = new Set<string>();
   const out: string[] = [];
   for (const item of [...fromDives, ...templates]) {
@@ -37,7 +72,31 @@ export function relatedQuestionsTitle(lang: UiLang): string {
   return HEADS[lang];
 }
 
-function aboutTopic(topic: string, lang: UiLang): string[] {
+function placeKind(query: string, places: readonly string[]): "country" | "place" | null {
+  const key = query.toLowerCase();
+  if (COUNTRIES.has(key)) return "country";
+  const named = places.some((place) => place.trim().toLowerCase() === key);
+  return named ? "place" : null;
+}
+
+function templatesFor(topic: string, lang: UiLang, kind: "country" | "place" | null, raw: string): string[] {
+  if (kind === "country") return aboutCountry(topic, lang);
+  if (kind === "place") return aboutPlace(topic, lang);
+  const words = raw.split(/\s+/);
+  const person = words.length >= 2 && words.length <= 4 && words.every((word) => /^[\p{L}][\p{L}'.-]*$/u.test(word));
+  return person ? aboutPerson(topic, lang) : aboutThing(topic, lang);
+}
+
+function labelTopic(topic: string): string {
+  if (topic !== topic.toLowerCase()) return topic;
+  const small = new Set(["of", "the", "and", "de", "da", "del", "la", "el", "al"]);
+  return topic
+    .split(" ")
+    .map((word, index) => (index > 0 && small.has(word) ? word : word.charAt(0).toUpperCase() + word.slice(1)))
+    .join(" ");
+}
+
+function aboutPerson(topic: string, lang: UiLang): string[] {
   const lines: Record<UiLang, [string, string, string]> = {
     "en-US": [`Who is ${topic}?`, `What is ${topic} known for?`, `What is the latest on ${topic}?`],
     "bn-BD": [`${topic} কে?`, `${topic} কী জন্য পরিচিত?`, `${topic} নিয়ে সর্বশেষ কী?`],
@@ -49,6 +108,54 @@ function aboutTopic(topic: string, lang: UiLang): string[] {
     "ja-JP": [`${topic}とは誰ですか？`, `${topic}は何で知られていますか？`, `${topic}の最新情報は何ですか？`],
     "pt-BR": [`Quem é ${topic}?`, `Por que ${topic} é conhecido?`, `Qual é a novidade sobre ${topic}?`],
     "de-DE": [`Wer ist ${topic}?`, `Wofür ist ${topic} bekannt?`, `Was gibt es Neues zu ${topic}?`],
+  };
+  return lines[lang];
+}
+
+function aboutCountry(topic: string, lang: UiLang): string[] {
+  const lines: Record<UiLang, [string, string, string]> = {
+    "en-US": [`Where is ${topic}?`, `What is the capital of ${topic}?`, `What is ${topic} known for?`],
+    "bn-BD": [`${topic} কোথায়?`, `${topic}-এর রাজধানী কী?`, `${topic} কী জন্য পরিচিত?`],
+    "hi-IN": [`${topic} कहाँ है?`, `${topic} की राजधानी क्या है?`, `${topic} किस लिए जाना जाता है?`],
+    "ar-SA": [`أين تقع ${topic}؟`, `ما عاصمة ${topic}؟`, `بماذا تشتهر ${topic}؟`],
+    "es-ES": [`¿Dónde está ${topic}?`, `¿Cuál es la capital de ${topic}?`, `¿Por qué se conoce a ${topic}?`],
+    "fr-FR": [`Où se trouve ${topic} ?`, `Quelle est la capitale de ${topic} ?`, `Pour quoi ${topic} est-il connu ?`],
+    "zh-CN": [`${topic}在哪里？`, `${topic}的首都是哪里？`, `${topic}以什么著称？`],
+    "ja-JP": [`${topic}はどこにありますか？`, `${topic}の首都はどこですか？`, `${topic}は何で知られていますか？`],
+    "pt-BR": [`Onde fica ${topic}?`, `Qual é a capital de ${topic}?`, `Por que ${topic} é conhecido?`],
+    "de-DE": [`Wo liegt ${topic}?`, `Was ist die Hauptstadt von ${topic}?`, `Wofür ist ${topic} bekannt?`],
+  };
+  return lines[lang];
+}
+
+function aboutPlace(topic: string, lang: UiLang): string[] {
+  const lines: Record<UiLang, [string, string, string]> = {
+    "en-US": [`Where is ${topic}?`, `What is ${topic} known for?`, `What is the latest on ${topic}?`],
+    "bn-BD": [`${topic} কোথায়?`, `${topic} কী জন্য পরিচিত?`, `${topic} নিয়ে সর্বশেষ কী?`],
+    "hi-IN": [`${topic} कहाँ है?`, `${topic} किस लिए जाना जाता है?`, `${topic} पर ताज़ा जानकारी क्या है?`],
+    "ar-SA": [`أين تقع ${topic}؟`, `بماذا تشتهر ${topic}؟`, `ما الجديد عن ${topic}؟`],
+    "es-ES": [`¿Dónde está ${topic}?`, `¿Por qué se conoce a ${topic}?`, `¿Qué hay de nuevo sobre ${topic}?`],
+    "fr-FR": [`Où se trouve ${topic} ?`, `Pour quoi ${topic} est-il connu ?`, `Quoi de neuf sur ${topic} ?`],
+    "zh-CN": [`${topic}在哪里？`, `${topic}以什么著称？`, `关于${topic}的最新情况是什么？`],
+    "ja-JP": [`${topic}はどこにありますか？`, `${topic}は何で知られていますか？`, `${topic}の最新情報は何ですか？`],
+    "pt-BR": [`Onde fica ${topic}?`, `Por que ${topic} é conhecido?`, `Qual é a novidade sobre ${topic}?`],
+    "de-DE": [`Wo liegt ${topic}?`, `Wofür ist ${topic} bekannt?`, `Was gibt es Neues zu ${topic}?`],
+  };
+  return lines[lang];
+}
+
+function aboutThing(topic: string, lang: UiLang): string[] {
+  const lines: Record<UiLang, [string, string, string]> = {
+    "en-US": [`What is ${topic}?`, `What is ${topic} known for?`, `What is the latest on ${topic}?`],
+    "bn-BD": [`${topic} কী?`, `${topic} কী জন্য পরিচিত?`, `${topic} নিয়ে সর্বশেষ কী?`],
+    "hi-IN": [`${topic} क्या है?`, `${topic} किस लिए जाना जाता है?`, `${topic} पर ताज़ा जानकारी क्या है?`],
+    "ar-SA": [`ما هو ${topic}؟`, `بماذا يشتهر ${topic}؟`, `ما الجديد عن ${topic}؟`],
+    "es-ES": [`¿Qué es ${topic}?`, `¿Por qué se conoce a ${topic}?`, `¿Qué hay de nuevo sobre ${topic}?`],
+    "fr-FR": [`Qu’est-ce que ${topic} ?`, `Pour quoi ${topic} est-il connu ?`, `Quoi de neuf sur ${topic} ?`],
+    "zh-CN": [`${topic}是什么？`, `${topic}以什么著称？`, `关于${topic}的最新情况是什么？`],
+    "ja-JP": [`${topic}とは何ですか？`, `${topic}は何で知られていますか？`, `${topic}の最新情報は何ですか？`],
+    "pt-BR": [`O que é ${topic}?`, `Por que ${topic} é conhecido?`, `Qual é a novidade sobre ${topic}?`],
+    "de-DE": [`Was ist ${topic}?`, `Wofür ist ${topic} bekannt?`, `Was gibt es Neues zu ${topic}?`],
   };
   return lines[lang];
 }
@@ -85,14 +192,20 @@ const DIVE: Record<string, (topic: string) => string> = {
   death: (topic) => `Is ${topic} still alive?`,
   died: (topic) => `When did ${topic} die?`,
   height: (topic) => `How tall is ${topic}?`,
+  capital: (topic) => `What is the capital of ${topic}?`,
+  population: (topic) => `What is the population of ${topic}?`,
+  map: (topic) => `Where is ${topic}?`,
+  currency: (topic) => `What is the currency of ${topic}?`,
+  language: (topic) => `What language is spoken in ${topic}?`,
 };
 
-/** "Tarique Rahman wife" → "Who is Tarique Rahman's wife?" */
-function questionFromDive(topic: string, dive: string): string | null {
+/** "Tarique Rahman wife" → "Who is Tarique Rahman's wife?" A place never gets a person question. */
+function questionFromDive(topic: string, raw: string, dive: string, place: boolean): string | null {
   const text = dive.replace(/\s+/g, " ").trim();
-  if (!text || text.toLowerCase() === topic.toLowerCase()) return null;
+  if (!text || text.toLowerCase() === raw.toLowerCase()) return null;
   if (text.endsWith("?")) return text;
-  const rest = text.toLowerCase().startsWith(topic.toLowerCase()) ? text.slice(topic.length).trim() : "";
-  const make = DIVE[rest.toLowerCase()];
+  const rest = text.toLowerCase().startsWith(raw.toLowerCase()) ? text.slice(raw.length).trim().toLowerCase() : "";
+  if (place && PERSON_RESTS.has(rest)) return null;
+  const make = DIVE[rest];
   return make ? make(topic) : null;
 }

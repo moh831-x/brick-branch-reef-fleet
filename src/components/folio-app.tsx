@@ -1654,7 +1654,7 @@ function AiAnswerCard({
         <button type="button" onClick={() => setAttempt(value => value + 1)} aria-label={copy.tryAgain} title={copy.tryAgain} className="mt-2 grid size-11 place-items-center rounded-full text-muted hover:bg-accent-soft hover:text-ink"><RotateCw className="size-4" aria-hidden="true" /></button>
       </div> : null}
       {answer?.status === "ok" ? <FollowUpSuggestions items={answer.question?.suggestions} lang={lang} onPick={(prompt) => sendFollowUp.current?.(prompt)} /> : null}
-      {answer?.status === "ok" ? <ChatFollowUps key={key} query={query} dives={data?.deepDive ?? []} initial={answer} context={pickAiContext({ news: sources.web ? data?.news : undefined, web: sources.web ? data?.web : undefined, wiki: sources.wiki ? data?.wiki : undefined, grok: sources.grok ? data?.grok : undefined, images: sources.images ? data?.images : undefined })} model={selected} lang={lang} copy={copy} sendRef={sendFollowUp} /> : null}
+      {answer?.status === "ok" ? <ChatFollowUps key={key} query={query} dives={data?.deepDive ?? []} places={placeNames(data)} initial={answer} context={pickAiContext({ news: sources.web ? data?.news : undefined, web: sources.web ? data?.web : undefined, wiki: sources.wiki ? data?.wiki : undefined, grok: sources.grok ? data?.grok : undefined, images: sources.images ? data?.images : undefined })} model={selected} lang={lang} copy={copy} sendRef={sendFollowUp} /> : null}
     </section>
   );
 }
@@ -3163,20 +3163,29 @@ type ChatTurn = { question: string; answer: AiAnswer | null; trace: WorkTrace | 
  * follow-ups while an answer is showing (see FollowUpBridge). This shows the conversation and tells
  * the search bar how to send.
  */
+function placeNames(data: SearchPayload | null): string[] {
+  if (!data) return [];
+  const names = data.places.map((place) => place.name);
+  if (data.card && /country|city|capital|state|province|region|island|territory|county/i.test(data.card.kicker)) names.push(data.card.title);
+  return names;
+}
+
 function RelatedQuestionList({
   query,
   dives,
+  places,
   lang,
   disabled,
   onPick,
 }: {
   query: string;
   dives: readonly string[];
+  places: readonly string[];
   lang: UiLang;
   disabled?: boolean;
   onPick: (prompt: string) => void;
 }) {
-  const specific = relatedQuestions(query, lang, dives);
+  const specific = relatedQuestions(query, lang, dives, places);
   const prompts = specific.length ? specific : followUpPrompts[lang];
   return (
     <div className="mt-5">
@@ -3199,8 +3208,8 @@ function RelatedQuestionList({
   );
 }
 
-function ChatFollowUps({ query, dives = [], initial, context, model, lang, copy, sendRef }: {
-  query: string; dives?: readonly string[]; initial: Extract<AiAnswer, { status: "ok" }>;
+function ChatFollowUps({ query, dives = [], places = [], initial, context, model, lang, copy, sendRef }: {
+  query: string; dives?: readonly string[]; places?: readonly string[]; initial: Extract<AiAnswer, { status: "ok" }>;
   context: AiContextItem[];
   model?: string; lang: UiLang; copy: UiCopy;
   sendRef?: { current: ((text: string) => void) | null };
@@ -3319,7 +3328,7 @@ function ChatFollowUps({ query, dives = [], initial, context, model, lang, copy,
     </div>
     <div ref={end} />
     {/* After a clarifying reply, its own suggestions replace the related questions. */}
-    {openQuestion ? null : <RelatedQuestionList query={query} dives={dives} lang={lang} disabled={pending} onPick={sendPrompt} />}
+    {openQuestion ? null : <RelatedQuestionList query={query} dives={dives} places={places} lang={lang} disabled={pending} onPick={sendPrompt} />}
     <p className="mt-2 text-xs leading-relaxed text-muted">{labels.privacy}</p>
   </div>;
 }
