@@ -50,6 +50,8 @@ import { ClarifyCard, FollowUpSuggestions } from "@/components/clarify-card";
 import { questionHistoryText } from "@/lib/ai-clarify";
 import { askAiWithProgress } from "@/lib/ask-ai";
 import { addClientStep, addDoneStep, addServerEvent, createTrace, finishWithAnswer, markSent, type WorkTrace } from "@/lib/ai-progress";
+import { ResearchSteps } from "@/components/research-steps";
+import { applyResearch, type ResearchItem } from "@/lib/research.shared";
 import { FAILURE_COPY } from "@/lib/work-label";
 import { activeTarget, afterRelease, PromptBridgeContext, usePromptBridge, type PromptBridge, type PromptTarget } from "@/components/prompt-bridge";
 import { imageCopy } from "@/lib/image-copy";
@@ -1322,7 +1324,8 @@ function Results({
 }
 
 
-type AiState = { key: string; answer: AiAnswer | null; trace: WorkTrace | null };
+/** `research`: the searches and notes streamed so far, while the answer is on its way. */
+type AiState = { key: string; answer: AiAnswer | null; trace: WorkTrace | null; research?: ResearchItem[] };
 
 /** One request per page load for which AI models can run on the server. */
 let providersRequest: Promise<AiModelStatus[]> | null = null;
@@ -1443,11 +1446,23 @@ function AiAnswerCard({
         current?.key === key ? { key, answer, trace: current.trace ? finishWithAnswer(current.trace, answer, performance.now()) : null } : current,
       );
     const spec = AI_MODELS.find((model) => model.id === selected);
+    // A search step or note arrived (agentic search): show it, and a new search on the live line.
+    const research = (item: ResearchItem) =>
+      setState((current) =>
+        current?.key === key && !current.answer
+          ? {
+              ...current,
+              research: applyResearch(current.research ?? [], item),
+              trace: current.trace && item.kind === "search" && item.status === "searching" ? addClientStep(current.trace, { kind: "search", sources: ["web"] }, performance.now()) : current.trace,
+            }
+          : current,
+      );
     askAiWithProgress(
-      { q: data.query, context, model: selected, lang },
+      { q: data.query, context, model: selected, lang, web: sources.web },
       {
         onEvent: (event) => update((current) => addServerEvent(current, event, performance.now())),
         onFallback: () => update((current) => addClientStep(current, { kind: "ask", ...(spec ? { model: spec.id, provider: spec.provider } : {}) }, performance.now())),
+        onResearch: research,
       },
     )
       .then(finish)
@@ -1457,6 +1472,7 @@ function AiAnswerCard({
 
   const answer = state?.key === key ? state.answer : null;
   const trace = state?.key === key ? state.trace : null;
+  const liveResearch = state?.key === key ? state.research : undefined;
   // Before the request leaves, the live line follows the search itself.
   const liveTrace =
     trace ??
@@ -1499,6 +1515,7 @@ function AiAnswerCard({
       <div aria-live="polite">
         {pending ? (
           <div className="mt-3">
+            <ResearchSteps items={liveResearch} lang={lang} />
             <WorkLive
               trace={liveTrace}
               lang={lang}
@@ -1519,6 +1536,7 @@ function AiAnswerCard({
         ) : answer.status === "ok" ? (
           <>
             {trace ? <WorkSummary trace={trace} lang={lang} copy={copy} /> : null}
+            <ResearchSteps items={answer.research} lang={lang} />
             <div className="mt-3 min-w-0 text-base leading-relaxed text-ink">
               <AiText
                 parts={answer.parts}
@@ -3083,7 +3101,7 @@ const copyFailure: Record<UiLang, string> = {
   "en-US": "Could not copy. Select the answer to copy it.", "bn-BD": "কপি করা যায়নি। উত্তর নির্বাচন করে কপি করুন।", "hi-IN": "कॉपी नहीं हुआ। उत्तर चुनकर कॉपी करें।", "ar-SA": "تعذر النسخ. حدد الإجابة لنسخها.", "es-ES": "No se pudo copiar. Selecciona la respuesta para copiarla.", "fr-FR": "Copie impossible. Sélectionnez la réponse pour la copier.", "zh-CN": "无法复制，请选中回答复制。", "ja-JP": "コピーできません。回答を選択してコピーしてください。", "pt-BR": "Não foi possível copiar. Selecione a resposta para copiá-la.", "de-DE": "Kopieren fehlgeschlagen. Wähle die Antwort zum Kopieren aus.",
 };
 
-type ChatTurn = { question: string; answer: AiAnswer | null; trace: WorkTrace | null };
+type ChatTurn = { question: string; answer: AiAnswer | null; trace: WorkTrace | null; research?: ResearchItem[] };
 
 /**
  * Follow-ups to the AI answer. There is no second text box: the search bar at the top sends the
@@ -3130,10 +3148,20 @@ function ChatFollowUps({ query, initial, context, model, lang, copy, sendRef }: 
       setTurns(current => [...current.slice(0, index), { question, answer, trace: finishWithAnswer(current[index]?.trace ?? trace, answer, performance.now()) }]);
     };
     const spec = AI_MODELS.find(item => item.id === model);
+    // A search step or note for this reply (agentic search): show it, and a new search on the live line.
+    const research = (item: ResearchItem) => {
+      if (!alive.current) return;
+      setTurns(current => current.map((turn, i) => (i === index && turn.answer === null ? {
+        ...turn,
+        research: applyResearch(turn.research ?? [], item),
+        trace: turn.trace && item.kind === "search" && item.status === "searching" ? addClientStep(turn.trace, { kind: "search", sources: ["web"] }, performance.now()) : turn.trace,
+      } : turn)));
+    };
     try {
-      finish(await askAiWithProgress({ q: question, history, context, model, lang }, {
+      finish(await askAiWithProgress({ q: question, history, context, model, lang, web: context.some(item => item.source === "web") }, {
         onEvent: event => update(current => addServerEvent(current, event, performance.now())),
         onFallback: () => update(current => addClientStep(current, { kind: "ask", ...(spec ? { model: spec.id, provider: spec.provider } : {}) }, performance.now())),
+        onResearch: research,
       }));
     } catch {
       finish({ status: "error", message: AI_MESSAGES.error });
@@ -3183,8 +3211,9 @@ function ChatFollowUps({ query, initial, context, model, lang, copy, sendRef }: 
     <div className="grid min-w-0 gap-5" aria-live="polite" aria-busy={pending}>
       {turns.map((turn, index) => <div key={index} className="min-w-0">
         <div dir="auto" className="mb-4 ms-auto w-fit max-w-full whitespace-pre-wrap break-words rounded-2xl bg-accent-soft px-4 py-3 text-sm text-ink">{turn.question}</div>
-        {turn.answer === null ? <WorkLive trace={turn.trace} lang={lang} copy={copy} fallback={questionCopy(lang).writing} /> : turn.answer.status === "ok" ? <>
+        {turn.answer === null ? <><ResearchSteps items={turn.research} lang={lang} /><WorkLive trace={turn.trace} lang={lang} copy={copy} fallback={questionCopy(lang).writing} /></> : turn.answer.status === "ok" ? <>
           {turn.trace ? <WorkSummary trace={turn.trace} lang={lang} copy={copy} /> : null}
+          <ResearchSteps items={turn.answer.research} lang={lang} />
           <div className="mt-2 min-w-0 text-base leading-relaxed"><AiText parts={turn.answer.parts} citations={turn.answer.citations} copy={copy} lang={lang} /></div>
           <ReadAloud resetKey={`${index}:${turn.question}`} lang={lang} ready copy={copy} label={copy.listenAnswer} text={turn.answer.parts.map(part => "text" in part ? part.text : " ").join("")} />
           <AnswerSources citations={turn.answer.citations} copy={copy} />

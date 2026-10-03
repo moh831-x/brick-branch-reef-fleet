@@ -39,7 +39,7 @@ function hostOf(url: string): string {
 }
 
 /** A site's icon (the same favicon service as the result list), or its first letter when that fails. */
-function Favicon({ url, size = 14 }: { url: string; size?: number }) {
+export function Favicon({ url, size = 14 }: { url: string; size?: number }) {
   const host = hostOf(url);
   const [broken, setBroken] = useState(false);
   useEffect(() => setBroken(false), [host]);
