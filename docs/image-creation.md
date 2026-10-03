@@ -1,5 +1,7 @@
 # Image creation beside AI answers
 
+> **Status:** the **Create image** button (and the panel it opened) has been removed from the site, so there is currently no way to create an image from the UI. The server side described below (`src/lib/image.server.ts`, `image.shared.ts`, `image.functions.ts`) is still in the code base and can be wired back to a new entry point.
+
 Search ZIP1, open **Create image** beneath the AI answer, edit the description, choose a shape, and create a single image. Readers can include the answer as context and download the generated JPEG. Closing and reopening the panel preserves the image; searching a new query resets it.
 
 The server uses the existing `XAI_API_KEY` with `grok-imagine-image-2.0`. Muse Spark remains the text-answer default. No image call runs on page load or while typing. Each explicit request creates one 1k, low-quality image. Missing keys, provider errors, moderation refusals, and usage limits have localized messages in all ten interface languages.

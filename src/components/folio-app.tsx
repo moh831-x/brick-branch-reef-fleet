@@ -41,7 +41,6 @@ import { chatCopy, followUpPrompts } from "@/lib/chat-copy";
 import { CHAT_INPUT_MAX, type ChatMessage } from "@/lib/chat.shared";
 import { questionCopy } from "@/lib/question-copy";
 import { AnswerCode } from "@/components/answer-code";
-import { AnswerImage } from "@/components/answer-image";
 import { WorkLive, WorkSummary } from "@/components/ai-work";
 import { NewsCards, SourceChip } from "@/components/news-answer";
 import { answerBlocks, groupCites, hasBullets, type AnswerBlock } from "@/lib/answer-blocks";
@@ -52,7 +51,6 @@ import { askAiWithProgress } from "@/lib/ask-ai";
 import { addClientStep, addDoneStep, addServerEvent, createTrace, finishWithAnswer, markSent, type WorkTrace } from "@/lib/ai-progress";
 import { FAILURE_COPY } from "@/lib/work-label";
 import { activeTarget, afterRelease, PromptBridgeContext, usePromptBridge, type PromptBridge, type PromptTarget } from "@/components/prompt-bridge";
-import { imageCopy } from "@/lib/image-copy";
 import { GraphCard } from "@/components/graph-card";
 import { langDir, langInfo, PREVIEW_TRANSLATE_CHARS, type UiLang } from "@/lib/i18n";
 import { clickAction, factsOf, trackPresses } from "@/lib/select-click";
@@ -252,7 +250,6 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
   // The language is picked on the home screen only; every other page follows that choice.
   const { lang: uiLang, copy } = useLang();
   const chatWords = chatCopy(uiLang);
-  const imageWords = imageCopy(uiLang);
   useEffect(() => {
     // Lets result links tell a plain click from the end of a drag-selection.
     trackPresses();
@@ -536,8 +533,8 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
   }
 
   const showMenu = open && !following && menu.length > 0;
-  const barPlaceholder = barTarget?.target.kind === "image" ? imageWords.prompt : following ? chatWords.placeholder : copy.search;
-  const barChip = barTarget?.target.kind === "image" ? imageWords.chip : chatWords.followUp;
+  const barPlaceholder = following ? chatWords.placeholder : copy.search;
+  const barChip = chatWords.followUp;
 
   function goHome() {
     setDraft("");
@@ -560,7 +557,7 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
         }}
       >
         {barTarget ? (
-          // Follow-up or image mode: this chip says so, and tapping it goes back to searching.
+          // Follow-up mode: this chip says so, and tapping it goes back to searching.
           <button
             type="button"
             onClick={newSearch}
@@ -568,7 +565,7 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
             title={chatWords.newSearch}
             className="inline-flex h-9 shrink-0 items-center gap-1 rounded-full bg-accent-soft px-2.5 text-xs text-accent transition-transform duration-150 ease-out active:scale-[0.96]"
           >
-            {barTarget.target.kind === "image" ? <ImageIcon className="size-3.5 shrink-0" aria-hidden="true" /> : <MessageSquare className="size-3.5 shrink-0" aria-hidden="true" />}
+            <MessageSquare className="size-3.5 shrink-0" aria-hidden="true" />
             <span className="hidden sm:inline">{barChip}</span>
             <X className="size-3.5 shrink-0" aria-hidden="true" />
           </button>
@@ -627,7 +624,7 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
         <button
           type="submit"
           disabled={!draft.trim() || Boolean(barTarget?.target.pending)}
-          aria-label={barTarget?.target.kind === "image" ? imageWords.create : following ? chatWords.send : copy.search}
+          aria-label={following ? chatWords.send : copy.search}
           className="inline-flex size-11 shrink-0 items-center justify-center rounded-full bg-ink text-bg transition-transform duration-150 ease-out active:scale-[0.96] disabled:opacity-40"
         >
           <ArrowUp className="size-4" />
@@ -1580,7 +1577,6 @@ function AiAnswerCard({
         <button type="button" onClick={() => setAttempt(value => value + 1)} aria-label={copy.tryAgain} title={copy.tryAgain} className="mt-2 grid size-11 place-items-center rounded-full text-muted hover:bg-accent-soft hover:text-ink"><RotateCw className="size-4" aria-hidden="true" /></button>
       </div> : null}
       {answer?.status === "ok" ? <FollowUpSuggestions items={answer.question?.suggestions} lang={lang} onPick={(prompt) => sendFollowUp.current?.(prompt)} /> : null}
-      <AnswerImage key={normalized} query={query} answer={answer?.status === "ok" ? answer.text : undefined} lang={lang} />
       {answer?.status === "ok" ? <ChatFollowUps key={key} query={query} initial={answer} context={pickAiContext({ news: sources.web ? data?.news : undefined, web: sources.web ? data?.web : undefined, wiki: sources.wiki ? data?.wiki : undefined, grok: sources.grok ? data?.grok : undefined, images: sources.images ? data?.images : undefined })} model={selected} lang={lang} copy={copy} sendRef={sendFollowUp} /> : null}
     </section>
   );
@@ -3190,7 +3186,6 @@ function ChatFollowUps({ query, initial, context, model, lang, copy, sendRef }: 
           <AnswerSources citations={turn.answer.citations} copy={copy} />
           <div className="flex items-center gap-1"><AnswerCopy text={turn.answer.text} lang={lang} /><AnswerFeedback key={turn.answer.text} text={turn.answer.text} copy={copy} lang={lang} /><button type="button" disabled={pending} onClick={() => void ask(turn.question, turns.slice(0, index))} aria-label={copy.tryAgain} title={copy.tryAgain} className="mt-2 grid size-11 place-items-center rounded-full text-muted hover:bg-accent-soft disabled:opacity-50"><RotateCw className="size-4" aria-hidden="true" /></button></div>
           <FollowUpSuggestions items={turn.answer.question?.suggestions} lang={lang} disabled={pending} onPick={sendPrompt} />
-          <AnswerImage query={turn.question} answer={turn.answer.text} lang={lang} />
           <p className="mt-2 text-xs text-muted">{fill(context.length ? copy.writtenBy : questionCopy(lang).writtenBy, { provider: aiProviderLabel(turn.answer.provider), model: turn.answer.model })}</p>
         </> : <>
           {turn.trace ? <WorkSummary trace={turn.trace} lang={lang} copy={copy} /> : null}
