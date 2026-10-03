@@ -38,6 +38,7 @@ import {
 import { SiteFooter } from "@/components/site-footer";
 import { fill, sourceLabel, type UiCopy } from "@/lib/ui-copy";
 import { chatCopy, followUpPrompts } from "@/lib/chat-copy";
+import { relatedQuestions, relatedQuestionsTitle } from "@/lib/related-questions";
 import { CHAT_INPUT_MAX, type ChatMessage } from "@/lib/chat.shared";
 import { questionCopy } from "@/lib/question-copy";
 import { AnswerCode } from "@/components/answer-code";
@@ -1228,10 +1229,17 @@ function Results({
         </div>
       </div>
 
-      {aiCard ? <div className={blocks.length ? "mb-8 lg:me-[22.5rem]" : "mb-8 max-w-3xl"}>{aiCard}</div> : null}
+      {aiCard ? <div className="mb-8">{aiCard}</div> : null}
 
-      <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-10 lg:grid-cols-[minmax(0,1fr)_20rem]">
-        <div className="order-2 grid gap-10 lg:order-1">
+      {(data.card || data.places.length > 0 || data.definitions.length > 0) ? (
+        <div className="mb-8 grid gap-4">
+          {data.card ? <Lead card={data.card} copy={copy} /> : null}
+          <PlaceList places={data.places} error={data.placesError} copy={copy} />
+          <Definitions items={data.definitions} copy={copy} />
+        </div>
+      ) : null}
+
+      <div className="grid min-w-0 gap-10">
           {!anyHits && !loading && blocks.length > 0 ? (
             <p className="text-muted">{copy.nothing}</p>
           ) : null}
@@ -1350,13 +1358,6 @@ function Results({
             );
           })}
         </div>
-        <div className="order-1 grid gap-4 lg:order-2">
-          {data.card ? <Lead card={data.card} copy={copy} /> : null}
-          <PlaceList places={data.places} error={data.placesError} copy={copy} />
-          <Definitions items={data.definitions} copy={copy} />
-          {!data.card && !data.places.length && loading ? <Skeleton /> : null}
-        </div>
-      </div>
       {openHit ? (
         <ResultPeek
           hit={openHit}
@@ -1653,7 +1654,7 @@ function AiAnswerCard({
         <button type="button" onClick={() => setAttempt(value => value + 1)} aria-label={copy.tryAgain} title={copy.tryAgain} className="mt-2 grid size-11 place-items-center rounded-full text-muted hover:bg-accent-soft hover:text-ink"><RotateCw className="size-4" aria-hidden="true" /></button>
       </div> : null}
       {answer?.status === "ok" ? <FollowUpSuggestions items={answer.question?.suggestions} lang={lang} onPick={(prompt) => sendFollowUp.current?.(prompt)} /> : null}
-      {answer?.status === "ok" ? <ChatFollowUps key={key} query={query} initial={answer} context={pickAiContext({ news: sources.web ? data?.news : undefined, web: sources.web ? data?.web : undefined, wiki: sources.wiki ? data?.wiki : undefined, grok: sources.grok ? data?.grok : undefined, images: sources.images ? data?.images : undefined })} model={selected} lang={lang} copy={copy} sendRef={sendFollowUp} /> : null}
+      {answer?.status === "ok" ? <ChatFollowUps key={key} query={query} dives={data?.deepDive ?? []} initial={answer} context={pickAiContext({ news: sources.web ? data?.news : undefined, web: sources.web ? data?.web : undefined, wiki: sources.wiki ? data?.wiki : undefined, grok: sources.grok ? data?.grok : undefined, images: sources.images ? data?.images : undefined })} model={selected} lang={lang} copy={copy} sendRef={sendFollowUp} /> : null}
     </section>
   );
 }
@@ -3162,8 +3163,44 @@ type ChatTurn = { question: string; answer: AiAnswer | null; trace: WorkTrace | 
  * follow-ups while an answer is showing (see FollowUpBridge). This shows the conversation and tells
  * the search bar how to send.
  */
-function ChatFollowUps({ query, initial, context, model, lang, copy, sendRef }: {
-  query: string; initial: Extract<AiAnswer, { status: "ok" }>;
+function RelatedQuestionList({
+  query,
+  dives,
+  lang,
+  disabled,
+  onPick,
+}: {
+  query: string;
+  dives: readonly string[];
+  lang: UiLang;
+  disabled?: boolean;
+  onPick: (prompt: string) => void;
+}) {
+  const specific = relatedQuestions(query, lang, dives);
+  const prompts = specific.length ? specific : followUpPrompts[lang];
+  return (
+    <div className="mt-5">
+      {specific.length ? <h3 className="px-2 text-sm font-medium text-ink">{relatedQuestionsTitle(lang)}</h3> : null}
+      <div className="mt-1 grid gap-1">
+        {prompts.map((prompt) => (
+          <button
+            key={prompt}
+            type="button"
+            disabled={disabled}
+            onClick={() => onPick(prompt)}
+            className="flex min-h-11 items-center gap-3 rounded-xl px-2 text-start text-sm text-muted hover:bg-accent-soft hover:text-ink disabled:opacity-50"
+          >
+            <ArrowUpRight className="size-4 shrink-0" aria-hidden="true" />
+            <span>{prompt}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ChatFollowUps({ query, dives = [], initial, context, model, lang, copy, sendRef }: {
+  query: string; dives?: readonly string[]; initial: Extract<AiAnswer, { status: "ok" }>;
   context: AiContextItem[];
   model?: string; lang: UiLang; copy: UiCopy;
   sendRef?: { current: ((text: string) => void) | null };
@@ -3281,14 +3318,8 @@ function ChatFollowUps({ query, initial, context, model, lang, copy, sendRef }: 
       </div>)}
     </div>
     <div ref={end} />
-    {/* After a clarifying reply, its own suggestions replace the generic follow-ups. */}
-    {openQuestion ? null : <div className="mt-5 grid gap-1">
-      {followUpPrompts[lang].map(prompt => <button key={prompt} type="button" disabled={pending}
-        onClick={() => sendPrompt(prompt)}
-        className="flex min-h-11 items-center gap-3 rounded-xl px-2 text-start text-sm text-muted hover:bg-accent-soft hover:text-ink disabled:opacity-50">
-        <ArrowUpRight className="size-4 shrink-0" aria-hidden="true" /><span>{prompt}</span>
-      </button>)}
-    </div>}
+    {/* After a clarifying reply, its own suggestions replace the related questions. */}
+    {openQuestion ? null : <RelatedQuestionList query={query} dives={dives} lang={lang} disabled={pending} onPick={sendPrompt} />}
     <p className="mt-2 text-xs leading-relaxed text-muted">{labels.privacy}</p>
   </div>;
 }
