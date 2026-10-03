@@ -4,6 +4,7 @@
  * to the active one, and shows which with a small chip that leads back to a plain search.
  */
 import { createContext, useContext } from "react";
+import type { AiQuestion } from "@/lib/ai-clarify";
 
 export type PromptKind = "chat" | "image";
 
@@ -15,6 +16,11 @@ export type PromptTarget = {
   maxLength: number;
   /** Send the text; false when it could not be sent (the bar keeps it). */
   submit: (text: string) => boolean;
+  /**
+   * A conversation waiting on a clarifying question: the bar shows it as a card above itself. An
+   * answer goes through `submit`; `dismiss` hides it (Skip, X, Escape).
+   */
+  question?: { key: string; value: AiQuestion; dismiss: () => void };
 };
 
 export type PromptBridge = {
