@@ -1,6 +1,6 @@
 /**
  * Every prompt goes through the one search bar. Features that take a prompt (follow-ups to the AI
- * answer, image creation) register here instead of drawing their own text box; the bar then sends
+ * answer) register here instead of drawing their own text box; the bar then sends
  * to the active one, and shows which with a small chip that leads back to a plain search.
  */
 import { createContext, useContext } from "react";
