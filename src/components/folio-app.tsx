@@ -404,11 +404,12 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
     }
   }
 
-  function chooseAiModel(id: string) {
+  function chooseAiModel(id: string | undefined) {
     tap("select");
     setAiModel(id);
     try {
-      localStorage.setItem(STORAGE_AI_MODEL, id);
+      if (id) localStorage.setItem(STORAGE_AI_MODEL, id);
+      else localStorage.removeItem(STORAGE_AI_MODEL);
     } catch {
       /* ignore quota */
     }
@@ -589,7 +590,7 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
         ) : null}
         <AiModelPicker
           models={aiModels}
-          selected={Array.isArray(aiModels) ? selectedAiModel(aiModel, aiModels.filter((row) => row.available).map((row) => row.id)) : aiModel}
+          selected={aiModel && Array.isArray(aiModels) ? selectedAiModel(aiModel, aiModels.filter((row) => row.available).map((row) => row.id)) : aiModel}
           compact
           copy={copy}
           onOpenChange={(next) => {
@@ -1602,7 +1603,7 @@ function AiModelPicker({
 }: {
   models: AiModelStatus[] | "failed" | null;
   selected: string | undefined;
-  onPick: (id: string) => void;
+  onPick: (id: string | undefined) => void;
   compact?: boolean;
   copy: UiCopy;
   onOpenChange?: (open: boolean) => void;
@@ -1653,7 +1654,7 @@ function AiModelPicker({
             : "inline-flex min-h-11 items-center gap-2 rounded-full border border-line bg-bg px-3 text-sm text-ink transition-transform duration-150 ease-out active:scale-[0.96] disabled:opacity-60"
         }
       >
-        <span className="truncate">{current?.label ?? copy.model}</span>
+        <span className="truncate">{selected ? current?.label ?? copy.model : copy.autoModel}</span>
         <ChevronDown className={`size-3.5 shrink-0 text-muted transition-transform ${open ? "rotate-180" : ""}`} aria-hidden="true" />
       </button>
       {open ? (
@@ -1673,7 +1674,18 @@ function AiModelPicker({
             className="mb-1 h-10 w-full rounded-xl border border-line bg-bg px-3 text-sm text-ink outline-none placeholder:text-muted"
           />
           <ul role="listbox" aria-label={copy.aiModels} className="max-h-72 overflow-y-auto">
-            {shown.length === 0 ? <li className="px-3 py-2 text-sm text-muted">{copy.noModels}</li> : null}
+            {!query || copy.autoModel.toLowerCase().includes(query) ? (
+              <li>
+                <button type="button" role="option" aria-selected={!selected}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => { onPick(undefined); setOpen(false); setFilter(""); }}
+                  className={`flex min-h-11 w-full items-center justify-between gap-3 rounded-xl px-3 text-start text-sm ${!selected ? "bg-accent-soft font-medium text-ink" : "text-ink hover:bg-bg"}`}>
+                  <span>{copy.autoModel}</span>
+                  {!selected ? <Check className="size-4" aria-hidden="true" /> : null}
+                </button>
+              </li>
+            ) : null}
+            {shown.length === 0 && query && !copy.autoModel.toLowerCase().includes(query) ? <li className="px-3 py-2 text-sm text-muted">{copy.noModels}</li> : null}
             {shown.map((model) => {
               const checked = model.id === selected;
               return (

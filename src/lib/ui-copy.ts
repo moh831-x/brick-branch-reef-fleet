@@ -76,6 +76,7 @@ export type UiCopy = {
   translatePartial: string;
   grokSearchedAs: string;
   shareText: string;
+  autoModel: string;
   aiModels: string;
   noModels: string;
   selected: string;
@@ -210,6 +211,7 @@ const en: UiCopy = {
   translatePartial: "Part of this text could not be translated and is shown in the original language.",
   grokSearchedAs: "Grokipedia (English only) was searched as",
   shareText: "Search results for “{q}” on Folio",
+  autoModel: "Auto",
   aiModels: "AI models",
   noModels: "No models",
   selected: "Selected",
@@ -343,6 +345,7 @@ export const UI: Record<UiLang, UiCopy> = {
     translatePartial: "এই লেখার কিছু অংশ অনুবাদ করা যায়নি, সেগুলো মূল ভাষায় দেখানো হচ্ছে।",
     grokSearchedAs: "Grokipedia (শুধু ইংরেজি) এইভাবে খোঁজা হয়েছে",
     shareText: "Folio-তে “{q}”-এর খোঁজের ফল",
+    autoModel: "স্বয়ংক্রিয়",
     aiModels: "AI মডেল",
     noModels: "কোনো মডেল নেই",
     selected: "বাছাই করা",
@@ -473,6 +476,7 @@ export const UI: Record<UiLang, UiCopy> = {
     translatePartial: "इस पाठ के कुछ हिस्सों का अनुवाद नहीं हो सका और वे मूल भाषा में दिख रहे हैं।",
     grokSearchedAs: "Grokipedia (केवल अंग्रेज़ी) में इस रूप में खोजा गया",
     shareText: "Folio पर “{q}” के खोज परिणाम",
+    autoModel: "स्वचालित",
     aiModels: "AI मॉडल",
     noModels: "कोई मॉडल नहीं",
     selected: "चुना गया",
@@ -603,6 +607,7 @@ export const UI: Record<UiLang, UiCopy> = {
     translatePartial: "تعذّرت ترجمة جزء من هذا النص، ويظهر بلغته الأصلية.",
     grokSearchedAs: "تم البحث في Grokipedia (بالإنجليزية فقط) بعبارة",
     shareText: "نتائج البحث عن «{q}» على Folio",
+    autoModel: "تلقائي",
     aiModels: "نماذج الذكاء الاصطناعي",
     noModels: "لا توجد نماذج",
     selected: "محدد",
@@ -733,6 +738,7 @@ export const UI: Record<UiLang, UiCopy> = {
     translatePartial: "Parte de este texto no se pudo traducir y se muestra en el idioma original.",
     grokSearchedAs: "Grokipedia (solo en inglés) se buscó como",
     shareText: "Resultados de búsqueda de “{q}” en Folio",
+    autoModel: "Automático",
     aiModels: "Modelos de IA",
     noModels: "No hay modelos",
     selected: "Seleccionado",
@@ -863,6 +869,7 @@ export const UI: Record<UiLang, UiCopy> = {
     translatePartial: "Une partie de ce texte n’a pas pu être traduite et reste dans sa langue d’origine.",
     grokSearchedAs: "Grokipedia (en anglais uniquement) a été interrogé avec",
     shareText: "Résultats de recherche pour « {q} » sur Folio",
+    autoModel: "Automatique",
     aiModels: "Modèles d’IA",
     noModels: "Aucun modèle",
     selected: "Sélectionné",
@@ -993,6 +1000,7 @@ export const UI: Record<UiLang, UiCopy> = {
     translatePartial: "部分文字无法翻译，以原文显示。",
     grokSearchedAs: "Grokipedia（仅英文）按此搜索",
     shareText: "Folio 上“{q}”的搜索结果",
+    autoModel: "自动",
     aiModels: "AI 模型",
     noModels: "没有模型",
     selected: "已选择",
@@ -1123,6 +1131,7 @@ export const UI: Record<UiLang, UiCopy> = {
     translatePartial: "このテキストの一部は翻訳できなかったため、元の言語で表示しています。",
     grokSearchedAs: "Grokipedia（英語のみ）は次の語で検索しました",
     shareText: "Folio での「{q}」の検索結果",
+    autoModel: "自動",
     aiModels: "AI モデル",
     noModels: "モデルがありません",
     selected: "選択中",
@@ -1253,6 +1262,7 @@ export const UI: Record<UiLang, UiCopy> = {
     translatePartial: "Parte deste texto não pôde ser traduzida e aparece no idioma original.",
     grokSearchedAs: "A Grokipedia (somente em inglês) foi pesquisada como",
     shareText: "Resultados da pesquisa por “{q}” no Folio",
+    autoModel: "Automático",
     aiModels: "Modelos de IA",
     noModels: "Nenhum modelo",
     selected: "Selecionado",
@@ -1383,6 +1393,7 @@ export const UI: Record<UiLang, UiCopy> = {
     translatePartial: "Ein Teil dieses Textes konnte nicht übersetzt werden und wird in der Originalsprache angezeigt.",
     grokSearchedAs: "Grokipedia (nur Englisch) wurde gesucht mit",
     shareText: "Suchergebnisse für „{q}“ auf Folio",
+    autoModel: "Automatisch",
     aiModels: "KI-Modelle",
     noModels: "Keine Modelle",
     selected: "Ausgewählt",
