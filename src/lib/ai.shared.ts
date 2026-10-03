@@ -4,6 +4,7 @@
  * so the browser bundle and the tests can import it.
  */
 
+import type { AiQuestion } from "./ai-clarify.ts";
 import { shortDate } from "./news.shared.ts";
 
 export type AiSourceId = "web" | "wiki" | "grok" | "images";
@@ -222,6 +223,8 @@ export type AiAnswer =
       picked?: string;
       /** Every model that was tried before the one that answered, with why it failed. */
       attempts?: AiAttempt[];
+      /** Set when the request was too open to answer: `text` is the short note, and the card asks this. */
+      question?: AiQuestion;
     }
   | {
       status: "unconfigured" | "no-context" | "error";

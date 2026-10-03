@@ -669,4 +669,53 @@ describe("news answers", () => {
     await runAiAnswer("python", news, "grok", { env: ALL, fetcher: plain.fetcher });
     assert.doesNotMatch(String((plain.calls[0]?.body.messages as Array<{ content: string }>)[0]?.content), /news search/);
   });
+
+  it("uses the news format instead of the clarifying rule when a chat search is news", async () => {
+    const { fetcher, calls } = fakeFetch();
+    await runAiAnswer("iran news", news, "grok", { env: ALL, fetcher, clarify: true, now: new Date("2026-10-02T15:00:00Z") });
+    const sent = String((calls[0]?.body.messages as Array<{ content: string }>)[0]?.content);
+    assert.match(sent, /This is a news search/);
+    assert.doesNotMatch(sent, /<clarify>/);
+    const both = system(buildProviderRequest(readProviderConfig("grok", ALL)!, "iran news", news, undefined, undefined, [], { news: true, clarify: true }).init);
+    assert.doesNotMatch(both, /<clarify>/);
+  });
+});
+
+describe("clarifying questions", () => {
+  const block = {
+    message: "What should the code do?",
+    question: "What kind of Python code do you want?",
+    options: [{ label: "Starter script", description: "A main() template" }, { label: "Web / API", description: "Call an API" }, { label: "Automation", description: "Rename files" }],
+    suggestions: ["Learn Python basics"],
+  };
+  const replyWith = (text: string) => (async () => Response.json({ model: "grok-test", choices: [{ message: { content: text } }] })) as unknown as typeof fetch;
+  const system = (init: RequestInit) => String((body(init).messages as Array<{ role: string; content: string }>)[0]?.content);
+
+  it("only adds the clarifying instructions on the chat path, and never for a graph", () => {
+    const grok = readProviderConfig("grok", ALL)!;
+    assert.match(system(buildProviderRequest(grok, "write a python code", [], undefined, undefined, [], { clarify: true }).init), /<clarify>/);
+    assert.doesNotMatch(system(buildProviderRequest(grok, "write a python code", []).init), /<clarify>/);
+    assert.doesNotMatch(system(buildProviderRequest(grok, "y = x^2", [], undefined, "y = x^2", [], { clarify: true }).init), /<clarify>/);
+    const claude = body(buildProviderRequest(readProviderConfig("claude", ALL)!, "make a website", context, undefined, undefined, [], { clarify: true }).init);
+    assert.match(String(claude.system), /never ask twice in a row/);
+  });
+
+  it("returns the question with its short note as the answer text", async () => {
+    const answer = await runAiAnswer("write a python code", [], "grok", { env: ALL, fetcher: replyWith(`<clarify>${JSON.stringify(block)}</clarify>`), clarify: true });
+    assert.equal(answer.status, "ok");
+    if (answer.status !== "ok") return;
+    assert.equal(answer.text, block.message);
+    assert.deepEqual(answer.parts, [{ text: block.message }]);
+    assert.deepEqual(answer.citations, []);
+    assert.equal(answer.question?.question, block.question);
+    assert.equal(answer.question?.options.length, 3);
+  });
+
+  it("answers clear prompts normally", async () => {
+    const answer = await runAiAnswer("capital of France", context, "grok", { env: ALL, fetcher: replyWith("Paris [1]."), clarify: true });
+    assert.equal(answer.status, "ok");
+    if (answer.status !== "ok") return;
+    assert.equal(answer.question, undefined);
+    assert.equal(answer.citations.length, 1);
+  });
 });

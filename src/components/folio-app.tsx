@@ -46,6 +46,8 @@ import { WorkLive, WorkSummary } from "@/components/ai-work";
 import { NewsCards, SourceChip } from "@/components/news-answer";
 import { answerBlocks, groupCites, hasBullets, type AnswerBlock } from "@/lib/answer-blocks";
 import { pickNewsCards } from "@/lib/news.shared";
+import { ClarifyCard, FollowUpSuggestions } from "@/components/clarify-card";
+import { questionHistoryText } from "@/lib/ai-clarify";
 import { askAiWithProgress } from "@/lib/ask-ai";
 import { addClientStep, addDoneStep, addServerEvent, createTrace, finishWithAnswer, markSent, type WorkTrace } from "@/lib/ai-progress";
 import { FAILURE_COPY } from "@/lib/work-label";
@@ -232,6 +234,11 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
   }), []);
   const barTarget = activeTarget(targets, activeId);
   const following = Boolean(barTarget);
+  // A conversation waiting on a clarifying question shows it as a card above the bar.
+  const barQuestion = barTarget?.target.kind === "chat" && !barTarget.target.pending ? barTarget.target.question : undefined;
+  // The bottom bar grows with that card, so the page keeps room under the conversation for it.
+  const barRef = useRef<HTMLDivElement>(null);
+  const [barHeight, setBarHeight] = useState(0);
   const [sources, setSources] = useState<Sources>(() => sourcesFrom(search));
   /** The reader's model pick: the address wins, then this browser's saved choice. */
   const [aiModel, setAiModel] = useState<string | undefined>(search.ai_model);
@@ -513,6 +520,21 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
     });
   }
 
+  useEffect(() => {
+    const box = barRef.current;
+    if (!onResults || !box || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => setBarHeight(box.offsetHeight));
+    observer.observe(box);
+    return () => observer.disconnect();
+  }, [onResults]);
+
+  function answerQuestion(text: string) {
+    if (barTarget?.target.submit(text)) {
+      tap("medium");
+      setOpen(false);
+    }
+  }
+
   const showMenu = open && !following && menu.length > 0;
   const barPlaceholder = barTarget?.target.kind === "image" ? imageWords.prompt : following ? chatWords.placeholder : copy.search;
   const barChip = barTarget?.target.kind === "image" ? imageWords.chip : chatWords.followUp;
@@ -739,8 +761,11 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
               <LanguagePicker />
             </div>
           </header>
-          <div className="fixed inset-x-0 bottom-0 z-30 bg-bg px-3 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+          <div ref={barRef} className="fixed inset-x-0 bottom-0 z-30 bg-bg px-3 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
             <div className="mx-auto max-w-3xl">
+              {barQuestion ? (
+                <ClarifyCard key={barQuestion.key} question={barQuestion.value} lang={uiLang} onAnswer={answerQuestion} onDismiss={barQuestion.dismiss} />
+              ) : null}
               {searchForm}
               <div className="mt-2 flex gap-2 overflow-x-auto pb-1">{sourcePills}</div>
             </div>
@@ -790,7 +815,7 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
         </>
       )}
       {onResults ? (
-        <main className="mx-auto max-w-3xl px-4 pt-6 pb-64 sm:px-6">
+        <main className="mx-auto max-w-3xl px-4 pt-6 pb-64 sm:px-6" style={barHeight ? { paddingBottom: `max(16rem, ${barHeight + 32}px)` } : undefined}>
           <Results
             query={query}
             data={data}
@@ -1338,6 +1363,8 @@ function AiAnswerCard({
   const [state, setState] = useState<AiState | null>(null);
   const [attempt, setAttempt] = useState(0);
   const asked = useRef<string | null>(null);
+  /** Sends a prompt as the next message in the conversation below (set by ChatFollowUps). */
+  const sendFollowUp = useRef<((text: string) => void) | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -1552,8 +1579,9 @@ function AiAnswerCard({
         <AnswerFeedback key={answer.text} text={answer.text} copy={copy} lang={lang} />
         <button type="button" onClick={() => setAttempt(value => value + 1)} aria-label={copy.tryAgain} title={copy.tryAgain} className="mt-2 grid size-11 place-items-center rounded-full text-muted hover:bg-accent-soft hover:text-ink"><RotateCw className="size-4" aria-hidden="true" /></button>
       </div> : null}
+      {answer?.status === "ok" ? <FollowUpSuggestions items={answer.question?.suggestions} lang={lang} onPick={(prompt) => sendFollowUp.current?.(prompt)} /> : null}
       <AnswerImage key={normalized} query={query} answer={answer?.status === "ok" ? answer.text : undefined} lang={lang} />
-      {answer?.status === "ok" ? <ChatFollowUps key={key} query={query} initial={answer} context={pickAiContext({ news: sources.web ? data?.news : undefined, web: sources.web ? data?.web : undefined, wiki: sources.wiki ? data?.wiki : undefined, grok: sources.grok ? data?.grok : undefined, images: sources.images ? data?.images : undefined })} model={selected} lang={lang} copy={copy} /> : null}
+      {answer?.status === "ok" ? <ChatFollowUps key={key} query={query} initial={answer} context={pickAiContext({ news: sources.web ? data?.news : undefined, web: sources.web ? data?.web : undefined, wiki: sources.wiki ? data?.wiki : undefined, grok: sources.grok ? data?.grok : undefined, images: sources.images ? data?.images : undefined })} model={selected} lang={lang} copy={copy} sendRef={sendFollowUp} /> : null}
     </section>
   );
 }
@@ -3062,12 +3090,15 @@ type ChatTurn = { question: string; answer: AiAnswer | null; trace: WorkTrace | 
  * follow-ups while an answer is showing (see FollowUpBridge). This shows the conversation and tells
  * the search bar how to send.
  */
-function ChatFollowUps({ query, initial, context, model, lang, copy }: {
+function ChatFollowUps({ query, initial, context, model, lang, copy, sendRef }: {
   query: string; initial: Extract<AiAnswer, { status: "ok" }>;
   context: AiContextItem[];
   model?: string; lang: UiLang; copy: UiCopy;
+  sendRef?: { current: ((text: string) => void) | null };
 }) {
   const [turns, setTurns] = useState<ChatTurn[]>([]);
+  /** The clarifying question the reader skipped or closed. */
+  const [dismissed, setDismissed] = useState<string | null>(null);
   const inFlight = useRef(false);
   const alive = useRef(true);
   const end = useRef<HTMLDivElement>(null);
@@ -3082,8 +3113,10 @@ function ChatFollowUps({ query, initial, context, model, lang, copy }: {
   async function ask(question: string, previous: ChatTurn[]) {
     if (inFlight.current) return;
     inFlight.current = true;
-    const history: ChatMessage[] = [{ role: "user", content: query }, { role: "assistant", content: initial.text }];
-    for (const turn of previous) if (turn.answer?.status === "ok") history.push({ role: "user", content: turn.question }, { role: "assistant", content: turn.answer.text });
+    // A clarifying reply goes into the history with its question and options, so a picked option makes sense.
+    const said = (answer: Extract<AiAnswer, { status: "ok" }>) => (answer.question ? questionHistoryText(answer.question) : answer.text);
+    const history: ChatMessage[] = [{ role: "user", content: query }, { role: "assistant", content: said(initial) }];
+    for (const turn of previous) if (turn.answer?.status === "ok") history.push({ role: "user", content: turn.question }, { role: "assistant", content: said(turn.answer) });
     const index = previous.length;
     const now = performance.now();
     const trace = markSent(addClientStep(createTrace(now), { kind: "read", chat: true }, now), now);
@@ -3108,6 +3141,24 @@ function ChatFollowUps({ query, initial, context, model, lang, copy }: {
   }
   const askRef = useRef(ask);
   askRef.current = ask;
+  /** Send a suggested prompt as the next message, with the bar following this conversation. */
+  function sendPrompt(prompt: string) {
+    bridge?.activate(chatId);
+    void askRef.current(prompt, latest.current);
+  }
+  useEffect(() => {
+    if (!sendRef) return;
+    sendRef.current = (prompt: string) => {
+      bridge?.activate(chatId);
+      void askRef.current(prompt, latest.current);
+    };
+    return () => { sendRef.current = null; };
+  }, [sendRef, bridge, chatId]);
+  // The latest reply's clarifying question, unless it was skipped: the bar shows it as a card.
+  const lastAnswer = turns.length ? turns[turns.length - 1]?.answer : initial;
+  const openQuestion = lastAnswer?.status === "ok" ? lastAnswer.question : undefined;
+  const questionKey = openQuestion ? `${turns.length}:${openQuestion.question}` : null;
+  const shownQuestion = openQuestion && questionKey !== dismissed ? openQuestion : undefined;
   // Let the search bar send follow-ups while this conversation is on the page.
   useEffect(() => {
     bridge?.register(chatId, {
@@ -3120,8 +3171,10 @@ function ChatFollowUps({ query, initial, context, model, lang, copy }: {
         void askRef.current(text, latest.current);
         return true;
       },
+      ...(shownQuestion && questionKey ? { question: { key: questionKey, value: shownQuestion, dismiss: () => setDismissed(questionKey) } } : {}),
     });
-  }, [bridge, chatId, pending]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- questionKey stands for shownQuestion
+  }, [bridge, chatId, pending, questionKey, dismissed]);
   useEffect(() => () => bridge?.unregister(chatId), [bridge, chatId]);
   return <div className="mt-4 border-t border-line pt-4">
     <div className="mb-4 flex items-center justify-between gap-3"><h3 className="inline-flex items-center gap-2 text-sm font-medium"><MessageSquare className="size-4 text-accent" aria-hidden="true" />{labels.title}</h3>
@@ -3136,6 +3189,7 @@ function ChatFollowUps({ query, initial, context, model, lang, copy }: {
           <ReadAloud resetKey={`${index}:${turn.question}`} lang={lang} ready copy={copy} label={copy.listenAnswer} text={turn.answer.parts.map(part => "text" in part ? part.text : " ").join("")} />
           <AnswerSources citations={turn.answer.citations} copy={copy} />
           <div className="flex items-center gap-1"><AnswerCopy text={turn.answer.text} lang={lang} /><AnswerFeedback key={turn.answer.text} text={turn.answer.text} copy={copy} lang={lang} /><button type="button" disabled={pending} onClick={() => void ask(turn.question, turns.slice(0, index))} aria-label={copy.tryAgain} title={copy.tryAgain} className="mt-2 grid size-11 place-items-center rounded-full text-muted hover:bg-accent-soft disabled:opacity-50"><RotateCw className="size-4" aria-hidden="true" /></button></div>
+          <FollowUpSuggestions items={turn.answer.question?.suggestions} lang={lang} disabled={pending} onPick={sendPrompt} />
           <AnswerImage query={turn.question} answer={turn.answer.text} lang={lang} />
           <p className="mt-2 text-xs text-muted">{fill(context.length ? copy.writtenBy : questionCopy(lang).writtenBy, { provider: aiProviderLabel(turn.answer.provider), model: turn.answer.model })}</p>
         </> : <>
@@ -3145,13 +3199,14 @@ function ChatFollowUps({ query, initial, context, model, lang, copy }: {
       </div>)}
     </div>
     <div ref={end} />
-    <div className="mt-5 grid gap-1">
+    {/* After a clarifying reply, its own suggestions replace the generic follow-ups. */}
+    {openQuestion ? null : <div className="mt-5 grid gap-1">
       {followUpPrompts[lang].map(prompt => <button key={prompt} type="button" disabled={pending}
-        onClick={() => { bridge?.activate(chatId); void ask(prompt, latest.current); }}
+        onClick={() => sendPrompt(prompt)}
         className="flex min-h-11 items-center gap-3 rounded-xl px-2 text-start text-sm text-muted hover:bg-accent-soft hover:text-ink disabled:opacity-50">
         <ArrowUpRight className="size-4 shrink-0" aria-hidden="true" /><span>{prompt}</span>
       </button>)}
-    </div>
+    </div>}
     <p className="mt-2 text-xs leading-relaxed text-muted">{labels.privacy}</p>
   </div>;
 }

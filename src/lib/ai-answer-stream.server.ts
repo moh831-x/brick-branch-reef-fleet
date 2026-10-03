@@ -1,7 +1,8 @@
 /**
  * The AI answer as a stream: one NDJSON line per real stage while the server works (asking a
  * model, a retry, a failure, a fallback, writing the answer), then one line with the answer. The
- * browser shows the stages as a live progress line, then as "Worked for 13s".
+ * browser shows the stages as a live progress line, then as "Worked for 13s". A request too open to
+ * answer gets a `question` line (the clarifying question card) right before the answer line.
  */
 import { AI_STREAM_TYPE, type AiStreamLine } from "./ai-progress.ts";
 import { AI_MESSAGES, type AiAnswer } from "./ai.shared.ts";
@@ -55,9 +56,16 @@ export async function streamAiAnswer(request: Request, run: typeof runAiAnswer =
           history: input.history,
           timeZone: input.tz,
           onProgress: (event) => send({ type: "progress", event }),
+          clarify: true,
         });
       } catch {
         answer = { status: "error", message: AI_MESSAGES.error };
+      }
+      if (answer.status === "ok" && answer.question) {
+        // The clarifying question is its own event; the answer that follows carries the short note.
+        const { question, ...rest } = answer;
+        send({ type: "question", question });
+        answer = rest;
       }
       send({ type: "answer", answer });
       open = false;

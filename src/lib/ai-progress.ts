@@ -6,6 +6,7 @@
  * Pure data and helpers, safe on the server and in the browser.
  */
 import type { AiAnswer, AiFailureKind, AiSourceId, AnswerProviderId } from "./ai.shared.ts";
+import { cleanQuestion, type AiQuestion } from "./ai-clarify.ts";
 
 /** What the server is doing. `at` is milliseconds since the server started on this answer. */
 export type AiProgressEvent =
@@ -19,8 +20,15 @@ export type AiProgressEvent =
 /** An event before the server stamps its time. */
 export type AiProgressInput = AiProgressEvent extends infer E ? (E extends AiProgressEvent ? Omit<E, "at"> : never) : never;
 
-/** One line of the streamed answer: progress while working, then exactly one answer. */
-export type AiStreamLine = { type: "progress"; event: AiProgressEvent } | { type: "answer"; answer: AiAnswer };
+/**
+ * One line of the streamed answer: progress while working, then exactly one answer. When the request
+ * was too open, a `question` line (the clarifying question for the card) comes just before the answer,
+ * whose text is then the short note. Readers that don't know `question` lines skip them.
+ */
+export type AiStreamLine =
+  | { type: "progress"; event: AiProgressEvent }
+  | { type: "question"; question: AiQuestion }
+  | { type: "answer"; answer: AiAnswer };
 
 export const AI_STREAM_PATH = "/api/ai-answer";
 export const AI_STREAM_TYPE = "application/x-ndjson";
@@ -193,6 +201,10 @@ export function parseStreamLine(line: string): AiStreamLine | null {
   const raw = value as Record<string, unknown>;
   if (raw.type === "answer" && raw.answer && typeof raw.answer === "object" && typeof (raw.answer as { status?: unknown }).status === "string") {
     return { type: "answer", answer: raw.answer as AiAnswer };
+  }
+  if (raw.type === "question") {
+    const question = cleanQuestion(raw.question);
+    return question ? { type: "question", question } : null;
   }
   if (raw.type === "progress" && raw.event && typeof raw.event === "object") {
     const event = raw.event as Record<string, unknown>;
