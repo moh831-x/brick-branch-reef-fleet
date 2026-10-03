@@ -4,6 +4,8 @@
  * so the browser bundle and the tests can import it.
  */
 
+import { shortDate } from "./news.shared.ts";
+
 export type AiSourceId = "web" | "wiki" | "grok" | "images";
 
 /** The AI providers Folio can ask, in fallback order. The id is what goes in the address (`ai_model=`). */
@@ -181,6 +183,10 @@ export type AiContextItem = {
   title: string;
   url: string;
   snippet: string;
+  /** The publisher, when the feed names it (news articles), for the source chip. */
+  site?: string;
+  /** When it was published ("Oct 2, 2026"), so the model can tell new from old. */
+  date?: string;
 };
 
 export type AiCitation = {
@@ -189,10 +195,15 @@ export type AiCitation = {
   source: AiSourceId;
   title: string;
   url: string;
+  /** The publisher, when the feed names it. */
+  site?: string;
 };
 
-/** A piece of the answer: plain text, or a citation marker pointing at `citations[n - 1]`. */
-export type AiPart = { text: string } | { cite: number } | { code: string; language: string };
+/**
+ * A piece of the answer: text (bold when `strong`, from the model's **…**), a citation marker
+ * pointing at `citations[n - 1]`, or a code block.
+ */
+export type AiPart = { text: string; strong?: boolean } | { cite: number } | { code: string; language: string };
 
 export type AiAnswer =
   | {
@@ -286,6 +297,8 @@ export const AI_MESSAGES = {
 
 /** How many results each source contributes, and the overall cap. */
 const PER_SOURCE: Record<AiSourceId, number> = { web: 5, wiki: 3, grok: 3, images: 3 };
+/** News articles handed to the model on a news search, ahead of the other sources. */
+const NEWS_CONTEXT = 5;
 export const AI_MAX_CONTEXT = 12;
 const CONTEXT_SOURCES = ["web", "wiki", "grok", "images"] as const;
 const TITLE_MAX = 180;
@@ -305,7 +318,7 @@ function httpUrl(value: string): string | null {
   }
 }
 
-type Hit = { title: string; url: string; snippet: string };
+type Hit = { title: string; url: string; snippet: string; site?: string; published?: string };
 
 function hostOf(value: string): string {
   try {
@@ -320,11 +333,15 @@ function hostOf(value: string): string {
  * interleaved so each source shows up near the top, deduped by address. Image results carry
  * their title and the page they were found on, since there is no text snippet.
  */
-export function pickAiContext(blocks: Partial<Record<AiSourceId, { results: Hit[] }>>): AiContextItem[] {
-  const pools = CONTEXT_SOURCES.map((source) => ({
-    source,
-    hits: (blocks[source]?.results ?? []).slice(0, PER_SOURCE[source]),
-  }));
+export function pickAiContext(blocks: Partial<Record<AiSourceId | "news", { results: Hit[] }>>): AiContextItem[] {
+  // News articles (a news search) go first and count as Web results.
+  const pools = [
+    { source: "web" as const, hits: (blocks.news?.results ?? []).slice(0, NEWS_CONTEXT) },
+    ...CONTEXT_SOURCES.map((source) => ({
+      source,
+      hits: (blocks[source]?.results ?? []).slice(0, PER_SOURCE[source]),
+    })),
+  ];
   const picked: AiContextItem[] = [];
   const seen = new Set<string>();
   const depth = Math.max(...pools.map((pool) => pool.hits.length), 0);
@@ -333,7 +350,7 @@ export function pickAiContext(blocks: Partial<Record<AiSourceId, { results: Hit[
       const hit = pool.hits[index];
       if (!hit) continue;
       const snippet = pool.source === "images" && !hit.snippet ? `Image found on ${hostOf(hit.url)}` : hit.snippet;
-      const item = cleanContextItem({ source: pool.source, title: hit.title, url: hit.url, snippet });
+      const item = cleanContextItem({ source: pool.source, title: hit.title, url: hit.url, snippet, site: hit.site, date: shortDate(hit.published) });
       if (!item || seen.has(item.url)) continue;
       seen.add(item.url);
       picked.push(item);
@@ -352,7 +369,9 @@ export function cleanContextItem(raw: unknown): AiContextItem | null {
   const url = typeof value.url === "string" ? httpUrl(value.url) : null;
   const snippet = typeof value.snippet === "string" ? tidy(value.snippet, SNIPPET_MAX) : "";
   if (!source || !title || !url) return null;
-  return { source, title, url, snippet };
+  const site = typeof value.site === "string" ? tidy(value.site, 80) : "";
+  const date = typeof value.date === "string" ? tidy(value.date, 40) : "";
+  return { source, title, url, snippet, ...(site ? { site } : {}), ...(date ? { date } : {}) };
 }
 
 const SOURCE_NAME: Record<AiSourceId, string> = { web: "Web", wiki: "Wikipedia", grok: "Grokipedia", images: "Images" };
@@ -379,7 +398,8 @@ export const AI_QUESTION_PROMPT = [
 export function buildAiPrompt(query: string, context: AiContextItem[], language?: string, graph?: string): string {
   const lines = context.map((item, index) => {
     const body = item.snippet ? `\n${item.snippet}` : "";
-    return `[${index + 1}] ${item.title} (${SOURCE_NAME[item.source]}, ${item.url})${body}`;
+    const about = [item.site ?? SOURCE_NAME[item.source], item.url, item.date ?? ""].filter(Boolean).join(", ");
+    return `[${index + 1}] ${item.title} (${about})${body}`;
   });
   const graphBlock = graph ? `\n\nGraph already shown with this answer:\n${graph}` : "";
   const results = lines.length ? lines.join("\n\n") : "(none)";
@@ -398,11 +418,11 @@ export function parseAiAnswer(raw: string, context: AiContextItem[]): { text: st
   const renumber = new Map<number, number>();
   const marker = /\[(\d{1,2}(?:\s*,\s*\d{1,2})*)\]/g;
 
-  function pushText(value: string) {
+  function pushText(value: string, strong = false) {
     if (!value) return;
     const prev = parts[parts.length - 1];
-    if (prev && "text" in prev) prev.text += value;
-    else parts.push({ text: value });
+    if (prev && "text" in prev && Boolean(prev.strong) === strong) prev.text += value;
+    else parts.push(strong ? { text: value, strong: true } : { text: value });
   }
 
   function parseProse(rawText: string) {
@@ -411,29 +431,37 @@ export function parseAiAnswer(raw: string, context: AiContextItem[]): { text: st
         pushText(segment);
         continue;
       }
-      const clean = segment.replace(/\*\*|__/g, "").replace(/^#+\s*/gm, "");
-      let last = 0;
-      for (const match of clean.matchAll(marker)) {
-        const at = match.index ?? 0;
-        pushText(clean.slice(last, at).replace(/\s+$/, ""));
-        last = at + match[0].length;
-        for (const piece of match[1].split(",")) {
-          const original = Number(piece.trim());
-          const item = context[original - 1];
-          if (!item) continue;
-          let n = renumber.get(original);
-          if (!n) {
-            n = citations.length + 1;
-            renumber.set(original, n);
-            citations.push({ n, source: item.source, title: item.title, url: item.url });
-          }
-          const prev = parts[parts.length - 1];
-          if (prev && "cite" in prev && prev.cite === n) continue;
-          parts.push({ cite: n });
-        }
+      // **bold** stays as a strong part (news headlines); stray markers and headings are dropped.
+      const pieces = segment.replace(/^#+\s*/gm, "").split(/(\*\*[^*\n]+?\*\*|__[^_\n]+?__)/g);
+      for (const piece of pieces) {
+        const bold = /^(\*\*|__)[\s\S]+\1$/.test(piece);
+        parseRun(bold ? piece.slice(2, -2) : piece.replace(/\*\*|__/g, ""), bold);
       }
-      pushText(clean.slice(last));
     }
+  }
+
+  function parseRun(clean: string, strong: boolean) {
+    let last = 0;
+    for (const match of clean.matchAll(marker)) {
+      const at = match.index ?? 0;
+      pushText(clean.slice(last, at).replace(/\s+$/, ""), strong);
+      last = at + match[0].length;
+      for (const piece of match[1].split(",")) {
+        const original = Number(piece.trim());
+        const item = context[original - 1];
+        if (!item) continue;
+        let n = renumber.get(original);
+        if (!n) {
+          n = citations.length + 1;
+          renumber.set(original, n);
+          citations.push({ n, source: item.source, title: item.title, url: item.url, ...(item.site ? { site: item.site } : {}) });
+        }
+        const prev = parts[parts.length - 1];
+        if (prev && "cite" in prev && prev.cite === n) continue;
+        parts.push({ cite: n });
+      }
+    }
+    pushText(clean.slice(last), strong);
   }
 
   // Fences are parsed before citation markers so array indexes and code literals stay intact.

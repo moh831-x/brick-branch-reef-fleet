@@ -2,8 +2,9 @@
 import { AI_MAX_CONTEXT, aiChoiceOf, cleanContextItem, type AiContextItem } from "./ai.shared.ts";
 import { CHAT_INPUT_MAX, cleanChatHistory, type ChatMessage } from "./chat.shared.ts";
 import { matchLang, type UiLang } from "./i18n.ts";
+import { cleanTimeZone } from "./news.shared.ts";
 
-export type AnswerRequest = { q: string; context: AiContextItem[]; history: ChatMessage[]; model?: string; lang?: UiLang };
+export type AnswerRequest = { q: string; context: AiContextItem[]; history: ChatMessage[]; model?: string; lang?: UiLang; tz?: string };
 
 /** Validate and bound everything the browser sent. Throws on a missing question. */
 export function readAnswerRequest(input: unknown): AnswerRequest {
@@ -20,5 +21,6 @@ export function readAnswerRequest(input: unknown): AnswerRequest {
     context.push(clean);
   }
   const requested = matchLang(typeof raw.lang === "string" ? raw.lang : "");
-  return { q, context, history: cleanChatHistory(raw.history), model: aiChoiceOf(raw.model), ...(requested ? { lang: requested } : {}) };
+  const tz = cleanTimeZone(raw.tz);
+  return { q, context, history: cleanChatHistory(raw.history), model: aiChoiceOf(raw.model), ...(requested ? { lang: requested } : {}), ...(tz ? { tz } : {}) };
 }

@@ -53,6 +53,7 @@ export async function streamAiAnswer(request: Request, run: typeof runAiAnswer =
         answer = await run(input.q, input.context, input.model, {
           answerLanguage: languageName(lang),
           history: input.history,
+          timeZone: input.tz,
           onProgress: (event) => send({ type: "progress", event }),
         });
       } catch {

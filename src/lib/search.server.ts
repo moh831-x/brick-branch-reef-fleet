@@ -1,6 +1,7 @@
 import { GROK_PAGE, IMAGES_MAX_PAGE, IMAGES_PAGE, isLatinQuery, PAGE, relevantCount, WEB_PAGE } from "./search.shared";
 import { LANGS, langInfo, matchLang, wikiOrigin as wikiOriginFor, type UiLang } from "./i18n";
 import { extractReadable, isPrivateHost, pageCharset, type ReaderPage } from "./reader";
+import { isNewsQuery, parseBingNews } from "./news.shared";
 
 export type SourceId = "web" | "wiki" | "grok" | "images";
 
@@ -21,6 +22,10 @@ export type SearchHit = {
   snippet: string;
   meta: string;
   image?: ImageRef;
+  /** News articles: the publisher as the feed names it. */
+  site?: string;
+  /** When the page or article was published (ISO), when the feed says. */
+  published?: string;
 };
 
 export type LeadCard = {
@@ -59,6 +64,8 @@ export type SearchPayload = {
   wiki: SourceBlock;
   grok: SourceBlock;
   images: SourceBlock;
+  /** News articles (Bing News) for a news search on the first web page: the AI cites them, and the answer shows them as cards. */
+  news?: SourceBlock;
   card: LeadCard | null;
   places: PlaceRef[];
   placesError?: string;
@@ -380,7 +387,9 @@ async function searchWeb(query: string, offset: number, near: string, lang: Sear
     const host = hostOf(link);
     if (!host || host.endsWith("bing.com")) continue;
     const snippet = clip(decodeEntities(tag(block, "description")), 160);
-    const when = formatDay(decodeEntities(tag(block, "pubDate")));
+    const pubDate = decodeEntities(tag(block, "pubDate"));
+    const when = formatDay(pubDate);
+    const published = pubDate && !Number.isNaN(new Date(pubDate).getTime()) ? new Date(pubDate).toISOString() : undefined;
     results.push({
       id: `web:${link}`,
       source: "web",
@@ -388,10 +397,18 @@ async function searchWeb(query: string, offset: number, near: string, lang: Sear
       url: link,
       snippet,
       meta: [host, when].filter(Boolean).join(" · "),
+      ...(published ? { published } : {}),
     });
     if (results.length >= WEB_PAGE) break;
   }
   return { results, total: readBingTotal(html), done: results.length < WEB_PAGE };
+}
+
+/** Bing's public news feed: headline, the article's own address, publisher, date, and a Bing thumbnail. */
+async function searchNews(query: string, lang: SearchLang | null): Promise<SourceBlock> {
+  const url = `https://www.bing.com/news/search?q=${encodeURIComponent(query)}&format=rss${bingLang(lang)}`;
+  const results = parseBingNews(await getText(url, "application/rss+xml, application/xml, text/xml"));
+  return { results, done: true };
 }
 
 /**
@@ -1000,7 +1017,9 @@ export async function runSearch(input: SearchInput): Promise<SearchPayload> {
   const webCandidates = lang ? unique([isLatinQuery(searched) ? searched : "", english, query]) : [query];
   const imageQuery = lang ? (isLatinQuery(query) ? query : english) : query;
 
-  const [webOutcome, wikiOutcome, grokOutcome, images, definitions, deepDive] = await Promise.all([
+  // A news search also reads the news feed (first page only), for the answer's citations and cards.
+  const wantNews = input.web && input.webOffset === 0 && isNewsQuery(query);
+  const [webOutcome, wikiOutcome, grokOutcome, images, definitions, deepDive, news] = await Promise.all([
     input.web
       ? searchWebBest(webCandidates, input.webOffset, input.near, lang).catch((error) => ({ block: failed(error), used: query }))
       : Promise.resolve({ block: emptyBlock(), used: query }),
@@ -1017,6 +1036,7 @@ export async function runSearch(input: SearchInput): Promise<SearchPayload> {
     input.images ? searchImages(imageQuery, input.imagesOffset).catch(failed) : Promise.resolve(emptyBlock()),
     defineQuery(input.card ? query : ""),
     input.web && input.webOffset === 0 ? readDeepDive(isLatinQuery(searched) ? searched : english, lang).catch(() => []) : Promise.resolve([]),
+    wantNews ? searchNews(isLatinQuery(query) ? query : english, lang).catch(() => null) : Promise.resolve(null),
   ]);
   const web = webOutcome.block;
   const { block: grok, error: grokTranslateError } = grokOutcome;
@@ -1064,6 +1084,7 @@ export async function runSearch(input: SearchInput): Promise<SearchPayload> {
     wiki,
     grok,
     images,
+    ...(news && news.results.length ? { news } : {}),
     card,
     places,
     placesError,

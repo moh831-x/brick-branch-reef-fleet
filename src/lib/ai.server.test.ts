@@ -645,3 +645,28 @@ it("runAiAnswer carries conversation history into the actual provider request", 
   assert.deepEqual(messages.slice(1, 3), history);
   assert.ok(messages.at(-1)?.content.includes("Double that number."));
 });
+
+describe("news answers", () => {
+  const system = (init: RequestInit) => String((body(init).messages as Array<{ role: string; content: string }>)[0]?.content);
+  const user = (init: RequestInit) => String((body(init).messages as Array<{ role: string; content: string }>).at(-1)?.content);
+  const news: AiContextItem[] = [{ source: "web", title: "Iran readies retaliation", url: "https://www.reuters.com/a", snippet: "a", site: "Reuters", date: "Oct 2, 2026" }];
+
+  it("asks for the news format, dated, only for a news search with sources", () => {
+    const grok = readProviderConfig("grok", ALL)!;
+    const dated = buildProviderRequest(grok, "iran news", news, undefined, undefined, [], { news: true, today: "October 2, 2026" }).init;
+    assert.match(system(dated), /This is a news search\. Today is October 2, 2026/);
+    assert.match(system(dated), /\*\*double asterisks\*\*/);
+    assert.match(user(dated), /\[1\] Iran readies retaliation \(Reuters, https:\/\/www\.reuters\.com\/a, Oct 2, 2026\)/);
+    assert.doesNotMatch(system(buildProviderRequest(grok, "iran news", [], undefined, undefined, [], { news: true }).init), /news search/);
+    assert.doesNotMatch(system(buildProviderRequest(grok, "python", news).init), /news search/);
+  });
+
+  it("turns news on from the query, on the reader's calendar", async () => {
+    const { fetcher, calls } = fakeFetch();
+    await runAiAnswer("iran news", news, "grok", { env: ALL, fetcher, timeZone: "America/New_York", now: new Date("2026-10-03T01:40:00Z") });
+    assert.match(String((calls[0]?.body.messages as Array<{ content: string }>)[0]?.content), /Today is October 2, 2026/);
+    const plain = fakeFetch();
+    await runAiAnswer("python", news, "grok", { env: ALL, fetcher: plain.fetcher });
+    assert.doesNotMatch(String((plain.calls[0]?.body.messages as Array<{ content: string }>)[0]?.content), /news search/);
+  });
+});

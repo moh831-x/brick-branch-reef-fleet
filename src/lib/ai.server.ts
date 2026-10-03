@@ -38,6 +38,7 @@ import {
   type AnswerProviderId,
 } from "./ai.shared.ts";
 import { graphAnswerBrief } from "./graph.ts";
+import { isNewsQuery, newsPrompt, todayLabel } from "./news.shared.ts";
 import { LANGS } from "./i18n.ts";
 
 type Env = Record<string, string | undefined>;
@@ -262,6 +263,9 @@ export function configForModel(modelId: string, env: Env = process.env): Provide
 
 type Request = { url: string; init: RequestInit };
 
+/** How the answer should read: `news` asks for the news format (see news.shared.ts), dated `today`. */
+export type PromptStyle = { news?: boolean; today?: string };
+
 /** Build the HTTP request for one provider. Exported for tests; it performs no I/O. */
 export function buildProviderRequest(
   config: ProviderConfig,
@@ -270,6 +274,7 @@ export function buildProviderRequest(
   language?: string,
   graph?: string,
   history: ChatMessage[] = [],
+  style: PromptStyle = {},
 ): Request {
   const graphNote = graph
     ? " A graph of this search is already drawn in the answer. Describe that function in plain language. Do not say the results do not answer the search. Cite a numbered result only when it is about the same function."
@@ -278,7 +283,9 @@ export function buildProviderRequest(
     ? AI_QUESTION_PROMPT.replace("No web references were supplied.", "Use the conversation to understand follow-up questions. When numbered references are supplied, use those for external facts and cite their current numbers. Do not treat previous assistant answers as verified sources.")
     : context.length ? AI_SYSTEM_PROMPT : AI_QUESTION_PROMPT;
   const messages = [...cleanChatHistory(history), { role: "user", content: buildAiPrompt(query, context, language, graph) }];
-  const system = `${language ? `${basePrompt} Write the entire answer in ${language}, even when the results are in another language.` : basePrompt}${graphNote}`;
+  // A news search with sources: dated intro, bold-headline bullets each ending in its sources, one follow-up offer.
+  const newsNote = style.news && context.length && !graph ? ` ${newsPrompt(style.today ?? todayLabel())}` : "";
+  const system = `${language ? `${basePrompt} Write the entire answer in ${language}, even when the results are in another language.` : basePrompt}${graphNote}${newsNote}`;
   if (config.api === "anthropic") {
     return {
       url: `${config.baseUrl}/messages`,
@@ -764,8 +771,9 @@ async function askProvider(
   graph?: string,
   history: ChatMessage[] = [],
   onReply?: () => void,
+  style: PromptStyle = {},
 ) {
-  const request = buildProviderRequest(config, query, context, language, graph, history);
+  const request = buildProviderRequest(config, query, context, language, graph, history, style);
   const timeout = AbortSignal.timeout(limits.timeoutMs ?? timeoutFor(config));
   const signal = limits.signal ? AbortSignal.any([timeout, limits.signal]) : timeout;
   const response = await fetcher(request.url, { ...request.init, signal });
@@ -812,11 +820,15 @@ export async function runAiAnswer(
     retryDelayMs?: number;
     /** Each real stage as it happens (asking a model, a retry, a failure, a fallback, writing), for the live progress line. */
     onProgress?: (event: AiProgressEvent) => void;
+    /** The reader's time zone, for "as of <today>" in a news answer. */
+    timeZone?: string;
+    now?: Date;
   } = {},
 ): Promise<AiAnswer> {
   const env = options.env ?? process.env;
   const fetcher = options.fetcher ?? fetch;
   const graph = graphAnswerBrief(query);
+  const style: PromptStyle = isNewsQuery(query) && context.length > 0 ? { news: true, today: todayLabel(options.now, options.timeZone) } : {};
   const totalMs = options.totalMs ?? AI_TOTAL_MS;
   const hedgeMs = options.hedgeMs ?? AI_HEDGE_MS;
   const minCallMs = options.minCallMs ?? MIN_CALL_MS;
@@ -890,6 +902,7 @@ export async function runAiAnswer(
           const answer = await askProvider(
             config, query, context, fetcher, options.answerLanguage, { timeoutMs, signal: stop }, graph ?? undefined, options.history,
             () => { if (!stop?.aborted) emit({ type: "write", ...who }); },
+            style,
           );
           return { ...answer, config };
         } catch (error) {
