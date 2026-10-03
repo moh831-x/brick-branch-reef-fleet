@@ -19,6 +19,7 @@ export function AnswerImage({ query, answer, lang }: { query: string; answer?: s
   const [open, setOpen] = useState(false);
   const [available, setAvailable] = useState<boolean | null>(null);
   const [prompt, setPrompt] = useState(query.slice(0, PROMPT_MAX));
+  useEffect(() => { if (!open) setPrompt(query.slice(0, PROMPT_MAX)); }, [query, open]);
   const [ratio, setRatio] = useState<ImageRatio>("1:1");
   const [useAnswer, setUseAnswer] = useState(true);
   const [busy, setBusy] = useState(false);
