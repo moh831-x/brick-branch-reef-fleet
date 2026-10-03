@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
+import { Fragment, createContext, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import { ArrowUp, ArrowUpRight, Check, Copy, ThumbsUp, ThumbsDown, MessageSquare, BookOpen, ChevronDown, ChevronLeft, ChevronRight, Clock, Compass, Globe, ImageIcon, Pause, Play, RotateCw, Search, Share, Sparkles, Square, TrendingUp, Volume2, X } from "lucide-react";
 import type { FolioSearch } from "@/routes/index";
@@ -32,6 +32,7 @@ import {
   selectedAiModel,
   type AiContextItem,
   type AiAnswer,
+  type AiCitation,
   type AiModelStatus,
   type AiPart,
 } from "@/lib/ai.shared";
@@ -1590,6 +1591,7 @@ function AiAnswerCard({
             </div>
           </div>
         ) : answer.status === "ok" ? (
+          <SourcePeek citations={answer.citations} lang={lang}>
           <>
             {trace ? <WorkSummary trace={trace} lang={lang} copy={copy} /> : null}
             <ResearchSteps items={answer.research} lang={lang} />
@@ -1626,6 +1628,7 @@ function AiAnswerCard({
             </p>
             {answer.attempts && answer.attempts.length > 0 ? <AiAttemptDetails attempts={answer.attempts} copy={copy} /> : null}
           </>
+          </SourcePeek>
         ) : (
           <>
           {trace ? <WorkSummary trace={trace} lang={lang} copy={copy} /> : null}
@@ -1836,13 +1839,14 @@ function AiText({
   /** Shown after the answer, or before its closing line when it is a list (news cards). */
   after?: ReactNode;
 }) {
+  const openSource = useContext(openSourcePeek);
   // An answer built from sources shows each point's sources as a chip (icon and name) where it cites them.
   const chips = citations.length > 0;
   const inline = (list: readonly AiPart[]) =>
     (chips ? groupCites(list) : list).map((part, index) => {
       if ("cites" in part) {
         const cites = part.cites.map((n) => citations[n - 1]).filter((cite): cite is (typeof citations)[number] => Boolean(cite));
-        return <SourceChip key={index} cites={cites} lang={lang} />;
+        return <SourceChip key={index} cites={cites} lang={lang} onOpen={openSource} />;
       }
       if ("code" in part) return <AnswerCode key={index} code={part.code} language={part.language} lang={lang} />;
       if ("text" in part) {
@@ -1853,16 +1857,14 @@ function AiText({
       if (!cite) return null;
       return (
         <sup key={index} className="ms-px">
-          <a
-            href={cite.url}
-            target="_blank"
-            rel="noreferrer"
-            {...selectSafeLink}
+          <button
+            type="button"
+            onClick={() => openSource(cite)}
             aria-label={fill(copy.sourceN, { n: String(cite.n), title: cite.title })}
             className="inline-block rounded-full bg-accent-soft px-[0.4em] py-[0.15em] text-[0.7rem] leading-none font-medium text-accent tabular-nums hover:bg-accent hover:text-bg"
           >
             {cite.n}
-          </a>
+          </button>
         </sup>
       );
     });
@@ -3087,7 +3089,51 @@ function Skeleton() {
   );
 }
 
+const openSourcePeek = createContext<(cite: AiCitation) => void>(() => {});
+
+function citeToHit(cite: AiCitation): SearchHit {
+  return {
+    id: `cite-${cite.n}-${cite.url}`,
+    source: cite.source,
+    title: cite.title,
+    url: cite.url,
+    snippet: "",
+    meta: cite.site || siteHost(cite.url),
+    ...(cite.site ? { site: cite.site } : {}),
+  };
+}
+
+/** Keeps the page in place and opens a cited source in the side preview. */
+function SourcePeek({ citations, lang, children }: { citations: AiCitation[]; lang: UiLang; children: ReactNode }) {
+  const [index, setIndex] = useState<number | null>(null);
+  const hits = useMemo(() => citations.map(citeToHit), [citations]);
+  const open = useCallback((cite: AiCitation) => {
+    const at = citations.findIndex((item) => item.n === cite.n && item.url === cite.url);
+    if (at < 0) return;
+    tap("light");
+    setIndex(at);
+  }, [citations]);
+  const hit = index != null ? hits[index] : undefined;
+  return (
+    <openSourcePeek.Provider value={open}>
+      {children}
+      {hit && index != null ? (
+        <ResultPeek
+          hit={hit}
+          index={index}
+          total={hits.length}
+          lang={lang}
+          onClose={() => setIndex(null)}
+          onPrev={() => setIndex((current) => (current != null && current > 0 ? current - 1 : current))}
+          onNext={() => setIndex((current) => (current != null && current < hits.length - 1 ? current + 1 : current))}
+        />
+      ) : null}
+    </openSourcePeek.Provider>
+  );
+}
+
 function AnswerSources({ citations, copy }: { citations: Extract<AiAnswer, { status: "ok" }>["citations"]; copy: UiCopy }) {
+  const open = useContext(openSourcePeek);
   if (!citations.length) return null;
   return <details className="group mt-3">
     <summary className="flex min-h-11 w-fit cursor-pointer list-none items-center gap-2 rounded-full border border-line bg-bg px-3 text-sm text-ink hover:bg-accent-soft [&::-webkit-details-marker]:hidden">
@@ -3098,7 +3144,7 @@ function AnswerSources({ citations, copy }: { citations: Extract<AiAnswer, { sta
               <ol className="mt-4 grid grid-cols-[minmax(0,1fr)] gap-1 border-t border-line pt-3">
                 {citations.map((cite) => (
                   <li key={cite.n}>
-                    <SelectableLink href={cite.url} className="flex min-h-11 items-center gap-2 text-sm text-ink hover:text-accent">
+                    <SelectableLink href={cite.url} popup onOpen={() => open(cite)} className="flex min-h-11 items-center gap-2 text-sm text-ink hover:text-accent">
                       <span className="grid size-6 shrink-0 place-items-center rounded-full bg-accent-soft text-xs font-medium text-accent tabular-nums">
                         {cite.n}
                       </span>
@@ -3311,7 +3357,7 @@ function ChatFollowUps({ query, dives = [], places = [], initial, context, model
     <div className="grid min-w-0 gap-5" aria-live="polite" aria-busy={pending}>
       {turns.map((turn, index) => <div key={index} className="min-w-0">
         <div dir="auto" className="mb-4 ms-auto w-fit max-w-full whitespace-pre-wrap break-words rounded-2xl bg-accent-soft px-4 py-3 text-sm text-ink">{turn.question}</div>
-        {turn.answer === null ? <><ResearchSteps items={turn.research} lang={lang} /><WorkLive trace={turn.trace} lang={lang} copy={copy} fallback={questionCopy(lang).writing} /></> : turn.answer.status === "ok" ? <>
+        {turn.answer === null ? <><ResearchSteps items={turn.research} lang={lang} /><WorkLive trace={turn.trace} lang={lang} copy={copy} fallback={questionCopy(lang).writing} /></> : turn.answer.status === "ok" ? <SourcePeek citations={turn.answer.citations} lang={lang}><>
           {turn.trace ? <WorkSummary trace={turn.trace} lang={lang} copy={copy} /> : null}
           <ResearchSteps items={turn.answer.research} lang={lang} />
           <div className="mt-2 min-w-0 text-base leading-relaxed"><AiText parts={turn.answer.parts} citations={turn.answer.citations} copy={copy} lang={lang} /></div>
@@ -3320,7 +3366,7 @@ function ChatFollowUps({ query, dives = [], places = [], initial, context, model
           <div className="flex items-center gap-1"><AnswerCopy text={turn.answer.text} lang={lang} /><AnswerFeedback key={turn.answer.text} text={turn.answer.text} copy={copy} lang={lang} /><button type="button" disabled={pending} onClick={() => void ask(turn.question, turns.slice(0, index))} aria-label={copy.tryAgain} title={copy.tryAgain} className="mt-2 grid size-11 place-items-center rounded-full text-muted hover:bg-accent-soft disabled:opacity-50"><RotateCw className="size-4" aria-hidden="true" /></button></div>
           <FollowUpSuggestions items={turn.answer.question?.suggestions} lang={lang} disabled={pending} onPick={sendPrompt} />
           <p className="mt-2 text-xs text-muted">{fill(context.length ? copy.writtenBy : questionCopy(lang).writtenBy, { provider: aiProviderLabel(turn.answer.provider), model: turn.answer.model })}</p>
-        </> : <>
+        </></SourcePeek> : <>
           {turn.trace ? <WorkSummary trace={turn.trace} lang={lang} copy={copy} /> : null}
           <div className="mt-2 flex flex-wrap items-center gap-3"><p role="status" className="text-sm text-muted">{turn.answer.status === "unconfigured" ? copy.aiUnconfigured : copy.aiError}</p><button type="button" disabled={pending} onClick={() => void ask(turn.question, turns.slice(0, index))} className="min-h-11 rounded-full border border-line px-4 text-sm">{copy.tryAgain}</button></div>
         </>}
