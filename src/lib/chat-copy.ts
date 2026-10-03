@@ -32,3 +32,17 @@ export function chatCopy(lang: UiLang) {
   const [followUp, newSearch, inBar] = barRows[lang];
   return { title, placeholder, send, newChat, copy, copied, privacy, start: start[lang], followUp, newSearch, inBar };
 }
+
+/** Follow-up requests use the existing conversation and its cited sources. */
+export const followUpPrompts: Record<UiLang, readonly string[]> = {
+  "en-US": ["Explain the key points in more detail.", "What evidence supports this answer?", "What other perspectives should I consider?"],
+  "bn-BD": ["মূল বিষয়গুলো আরও বিস্তারিত ব্যাখ্যা করুন।", "এই উত্তরের পক্ষে কী প্রমাণ আছে?", "আর কোন দৃষ্টিভঙ্গি বিবেচনা করা উচিত?"],
+  "hi-IN": ["मुख्य बिंदुओं को विस्तार से समझाएँ।", "इस उत्तर के समर्थन में क्या प्रमाण हैं?", "मुझे किन अन्य दृष्टिकोणों पर विचार करना चाहिए?"],
+  "ar-SA": ["اشرح النقاط الرئيسية بمزيد من التفصيل.", "ما الأدلة التي تدعم هذه الإجابة؟", "ما وجهات النظر الأخرى التي ينبغي مراعاتها؟"],
+  "es-ES": ["Explica los puntos clave con más detalle.", "¿Qué pruebas respaldan esta respuesta?", "¿Qué otras perspectivas debería considerar?"],
+  "fr-FR": ["Explique les points clés plus en détail.", "Quelles preuves étayent cette réponse ?", "Quels autres points de vue devrais-je considérer ?"],
+  "zh-CN": ["请更详细地解释要点。", "有哪些证据支持这个回答？", "我还应该考虑哪些观点？"],
+  "ja-JP": ["要点をさらに詳しく説明してください。", "この回答を裏付ける根拠は何ですか？", "他にどのような視点を考慮すべきですか？"],
+  "pt-BR": ["Explique os pontos principais com mais detalhes.", "Quais evidências sustentam esta resposta?", "Que outras perspectivas devo considerar?"],
+  "de-DE": ["Erkläre die wichtigsten Punkte ausführlicher.", "Welche Belege stützen diese Antwort?", "Welche anderen Perspektiven sollte ich berücksichtigen?"],
+};
