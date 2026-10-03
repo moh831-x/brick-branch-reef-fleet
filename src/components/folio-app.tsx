@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useId, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
+import { Fragment, createContext, useCallback, useContext, useEffect, useId, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import { ArrowUp, ArrowUpRight, Check, Copy, MessageSquare, BookOpen, ChevronDown, ChevronLeft, ChevronRight, Clock, Compass, Globe, ImageIcon, Pause, Play, RotateCw, Search, Share, Sparkles, Square, TrendingUp, Volume2, X } from "lucide-react";
 import type { FolioSearch } from "@/routes/index";
@@ -175,6 +175,9 @@ function formatTook(ms: number): string {
   return `${(ms / 1000).toFixed(1)} s`;
 }
 
+type ChatInputBridge = { register: (send: ((question: string) => void) | null) => void; setBusy: (busy: boolean) => void };
+const ChatInputContext = createContext<ChatInputBridge | null>(null);
+
 export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPayload | null }) {
   const navigate = useNavigate({ from: "/" });
   const loading = useRouterState({ select: (state) => state.isLoading });
@@ -184,6 +187,16 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
   const onResults = query.length > 0;
 
   const [draft, setDraft] = useState(query);
+  const chatSend = useRef<((question: string) => void) | null>(null);
+  const [chatReady, setChatReady] = useState(false);
+  const [chatBusy, setChatBusy] = useState(false);
+  const registerChat = useCallback((send: ((question: string) => void) | null) => {
+    const starting = send && !chatSend.current;
+    chatSend.current = send;
+    setChatReady(Boolean(send));
+    if (starting) { setDraft(""); setOpen(false); }
+    if (!send) setChatBusy(false);
+  }, []);
   const [sources, setSources] = useState<Sources>(() => sourcesFrom(search));
   /** The reader's model pick: the address wins, then this browser's saved choice. */
   const [aiModel, setAiModel] = useState<string | undefined>(search.ai_model);
@@ -234,14 +247,14 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
 
   useEffect(() => {
     const q = draft.trim();
-    if (!open || q.length < 2) return;
+    if (chatReady || !open || q.length < 2) return;
     const handle = window.setTimeout(() => {
       suggestQueries({ data: { q, lang: uiLang } })
         .then((rows) => setSuggestions(rows))
         .catch(() => setSuggestions([]));
     }, 180);
     return () => window.clearTimeout(handle);
-  }, [draft, open, uiLang]);
+  }, [draft, open, uiLang, chatReady]);
 
   useEffect(() => {
     let cancelled = false;
@@ -388,6 +401,14 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
 
   function onSubmit(event: FormEvent) {
     event.preventDefault();
+    if (chatReady && chatSend.current) {
+      const question = draft.trim();
+      if (!question || chatBusy) return;
+      chatSend.current(question);
+      setDraft("");
+      setOpen(false);
+      return;
+    }
     if (active >= 0 && menu[active]) go(menu[active]);
     else go(draft);
   }
@@ -429,7 +450,7 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
     });
   }
 
-  const showMenu = open && menu.length > 0;
+  const showMenu = !chatReady && open && menu.length > 0;
 
   function goHome() {
     setDraft("");
@@ -440,7 +461,7 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
   const searchForm = (
     <form onSubmit={onSubmit} className="relative" role="search">
       <label htmlFor="folio-q" className="sr-only">
-        {copy.search}
+        {chatReady ? chatCopy(uiLang).placeholder : copy.search}
       </label>
       <div
         className="flex min-h-14 items-center gap-2 rounded-2xl border border-line bg-surface px-3 focus-within:border-accent"
@@ -464,7 +485,8 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
           onFocus={() => setOpen(true)}
           onBlur={() => window.setTimeout(() => setOpen(false), 140)}
           onKeyDown={onKeyDown}
-          placeholder={copy.search}
+          maxLength={chatReady ? CHAT_INPUT_MAX : 180}
+          placeholder={chatReady ? chatCopy(uiLang).placeholder : copy.search}
           dir="auto"
           autoComplete="off"
           enterKeyHint="search"
@@ -500,7 +522,7 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
         />
         <button
           type="submit"
-          disabled={!draft.trim()}
+          disabled={!draft.trim() || chatBusy}
           aria-label={copy.search}
           className="inline-flex size-11 shrink-0 items-center justify-center rounded-full bg-ink text-bg transition-transform duration-150 ease-out active:scale-[0.96] disabled:opacity-40"
         >
@@ -622,6 +644,7 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
   );
 
   return (
+    <ChatInputContext.Provider value={{ register: registerChat, setBusy: setChatBusy }}>
     <div className="min-h-screen">
       <div className="fixed inset-x-0 top-0 z-30 h-0.5" aria-hidden="true">
         {loading ? <div className="folio-bar h-full w-1/3 bg-accent" /> : null}
@@ -629,7 +652,7 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
       {onResults ? (
         <header
           className={`fixed inset-x-0 top-0 z-20 border-b border-line bg-bg transition-transform duration-200 ease-out ${
-            chrome === "hidden" && !open ? "-translate-y-full" : "translate-y-0"
+            !chatReady && chrome === "hidden" && !open ? "-translate-y-full" : "translate-y-0"
           }`}
         >
           <div className="mx-auto flex max-w-6xl flex-col px-4 py-3 sm:px-6">
@@ -637,13 +660,13 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
               type="button"
               onClick={goHome}
               className={`w-fit font-display text-2xl tracking-tight text-ink transition-transform duration-150 ease-out active:scale-[0.96] ${
-                chrome === "search" && !open ? "hidden" : ""
+                !chatReady && chrome === "search" && !open ? "hidden" : ""
               }`}
             >
               Folio
             </button>
-            <div className={chrome === "search" && !open ? "" : "pt-4"}>{searchForm}</div>
-            <div className={chrome === "search" && !open ? "hidden" : "pt-4"}>{sourcePills}</div>
+            <div className={!chatReady && chrome === "search" && !open ? "" : "pt-4"}>{searchForm}</div>
+            <div className={!chatReady && chrome === "search" && !open ? "hidden" : "pt-4"}>{sourcePills}</div>
           </div>
         </header>
       ) : (
@@ -720,6 +743,7 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
       ) : null}
       <SiteFooter copy={copy} />
     </div>
+    </ChatInputContext.Provider>
   );
 }
 
@@ -2833,13 +2857,12 @@ function ChatFollowUps({ query, initial, context, model, lang, copy }: {
   model?: string; lang: UiLang; copy: UiCopy;
 }) {
   const [turns, setTurns] = useState<ChatTurn[]>([]);
-  const [draft, setDraft] = useState("");
   const inFlight = useRef(false);
   const alive = useRef(true);
   const end = useRef<HTMLDivElement>(null);
-  const composer = useRef<HTMLTextAreaElement>(null);
+  const inputBridge = useContext(ChatInputContext);
   const labels = chatCopy(lang);
-  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; inputBridge?.register(null); }; }, []);
   const pending = turns.some(turn => turn.answer === null);
   useEffect(() => { if (turns.length) end.current?.scrollIntoView({ behavior: "auto", block: "nearest" }); }, [turns]);
   async function ask(question: string, previous: ChatTurn[]) {
@@ -2855,13 +2878,14 @@ function ChatFollowUps({ query, initial, context, model, lang, copy }: {
       if (alive.current) setTurns([...previous, { question, answer: { status: "error", message: AI_MESSAGES.error } }]);
     } finally { inFlight.current = false; }
   }
-  function submit(event: FormEvent) {
-    event.preventDefault();
-    const question = draft.trim();
-    if (!question || pending || inFlight.current) return;
-    setDraft("");
-    void ask(question, turns);
-  }
+  useEffect(() => {
+    inputBridge?.register(question => {
+      if (!pending && !inFlight.current) void ask(question, turns);
+    });
+    inputBridge?.setBusy(pending);
+    // The bridge callbacks are stable; latest turns are registered after each answer.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [turns, pending]);
   return <div className="mt-4 border-t border-line pt-4">
     <div className="mb-4 flex items-center justify-between gap-3"><h3 className="inline-flex items-center gap-2 text-sm font-medium"><MessageSquare className="size-4 text-accent" aria-hidden="true" />{labels.title}</h3>
       <Link to="/" search={{ q: "", near: "" }} className="inline-flex min-h-11 items-center rounded-full px-3 text-xs text-muted hover:text-accent">{labels.newChat}</Link>
@@ -2873,17 +2897,12 @@ function ChatFollowUps({ query, initial, context, model, lang, copy }: {
           <div className="min-w-0 text-base leading-relaxed"><AiText parts={turn.answer.parts} citations={turn.answer.citations} copy={copy} lang={lang} /></div>
           <ReadAloud resetKey={`${index}:${turn.question}`} lang={lang} ready copy={copy} label={copy.listenAnswer} text={turn.answer.parts.map(part => "text" in part ? part.text : " ").join("")} />
           <AnswerCopy text={turn.answer.text} lang={lang} />
+          <AnswerImage query={turn.question} answer={turn.answer.text} lang={lang} />
           <p className="mt-2 text-xs text-muted">{fill(context.length ? copy.writtenBy : questionCopy(lang).writtenBy, { provider: aiProviderLabel(turn.answer.provider), model: turn.answer.model })}</p>
         </> : <div className="flex flex-wrap items-center gap-3"><p role="status" className="text-sm text-muted">{turn.answer.status === "unconfigured" ? copy.aiUnconfigured : copy.aiError}</p><button type="button" disabled={pending} onClick={() => void ask(turn.question, turns.slice(0, index))} className="min-h-11 rounded-full border border-line px-4 text-sm">{copy.tryAgain}</button></div>}
       </div>)}
     </div>
     <div ref={end} />
-    <form onSubmit={submit} className="mt-5 rounded-2xl border border-line bg-bg p-3">
-      <textarea ref={composer} value={draft} onChange={event => setDraft(event.target.value)} maxLength={CHAT_INPUT_MAX} rows={3} aria-label={labels.placeholder} placeholder={labels.placeholder} onKeyDown={event => {
-        if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); }
-      }} className="block w-full resize-y bg-transparent text-sm leading-relaxed text-ink placeholder:text-muted focus:outline-none" />
-      <div className="mt-2 flex items-center justify-between gap-3"><span className="text-xs text-muted tabular-nums">{draft.length} / {CHAT_INPUT_MAX}</span><button type="submit" disabled={pending || !draft.trim()} aria-label={labels.send} className="inline-flex min-h-11 items-center gap-2 rounded-full bg-ink px-4 text-sm text-bg disabled:opacity-40"><span>{labels.send}</span><ArrowUp className="size-4" aria-hidden="true" /></button></div>
-    </form>
     <p className="mt-2 text-xs leading-relaxed text-muted">{labels.privacy}</p>
   </div>;
 }
