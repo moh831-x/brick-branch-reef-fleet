@@ -4,6 +4,8 @@
  * so the browser bundle and the tests can import it.
  */
 
+import type { AiQuestion } from "./ai-clarify.ts";
+
 export type AiSourceId = "web" | "wiki" | "grok" | "images";
 
 /** The AI providers Folio can ask, in fallback order. The id is what goes in the address (`ai_model=`). */
@@ -211,6 +213,8 @@ export type AiAnswer =
       picked?: string;
       /** Every model that was tried before the one that answered, with why it failed. */
       attempts?: AiAttempt[];
+      /** Set when the request was too open to answer: `text` is the short note, and the card asks this. */
+      question?: AiQuestion;
     }
   | {
       status: "unconfigured" | "no-context" | "error";

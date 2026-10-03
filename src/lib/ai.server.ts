@@ -29,7 +29,9 @@ import {
   parseAiAnswer,
   type AiAnswer,
   type AiAttempt,
+  type AiCitation,
   type AiFailureKind,
+  type AiPart,
   type AiContextItem,
   type AiKeyFlags,
   type AiModelStatus,
@@ -37,6 +39,7 @@ import {
   type AiProviderStatus,
   type AnswerProviderId,
 } from "./ai.shared.ts";
+import { AI_CLARIFY_PROMPT, readClarify } from "./ai-clarify.ts";
 import { graphAnswerBrief } from "./graph.ts";
 import { LANGS } from "./i18n.ts";
 
@@ -270,6 +273,7 @@ export function buildProviderRequest(
   language?: string,
   graph?: string,
   history: ChatMessage[] = [],
+  clarify = false,
 ): Request {
   const graphNote = graph
     ? " A graph of this search is already drawn in the answer. Describe that function in plain language. Do not say the results do not answer the search. Cite a numbered result only when it is about the same function."
@@ -278,7 +282,9 @@ export function buildProviderRequest(
     ? AI_QUESTION_PROMPT.replace("No web references were supplied.", "Use the conversation to understand follow-up questions. When numbered references are supplied, use those for external facts and cite their current numbers. Do not treat previous assistant answers as verified sources.")
     : context.length ? AI_SYSTEM_PROMPT : AI_QUESTION_PROMPT;
   const messages = [...cleanChatHistory(history), { role: "user", content: buildAiPrompt(query, context, language, graph) }];
-  const system = `${language ? `${basePrompt} Write the entire answer in ${language}, even when the results are in another language.` : basePrompt}${graphNote}`;
+  // A graph search is never too open: it already has a function to describe.
+  const clarifyNote = clarify && !graph ? ` ${AI_CLARIFY_PROMPT}` : "";
+  const system = `${language ? `${basePrompt} Write the entire answer in ${language}, even when the results are in another language.` : basePrompt}${graphNote}${clarifyNote}`;
   if (config.api === "anthropic") {
     return {
       url: `${config.baseUrl}/messages`,
@@ -764,8 +770,9 @@ async function askProvider(
   graph?: string,
   history: ChatMessage[] = [],
   onReply?: () => void,
+  clarify = false,
 ) {
-  const request = buildProviderRequest(config, query, context, language, graph, history);
+  const request = buildProviderRequest(config, query, context, language, graph, history, clarify);
   const timeout = AbortSignal.timeout(limits.timeoutMs ?? timeoutFor(config));
   const signal = limits.signal ? AbortSignal.any([timeout, limits.signal]) : timeout;
   const response = await fetcher(request.url, { ...request.init, signal });
@@ -780,7 +787,13 @@ async function askProvider(
   // The model has replied: what is left is reading its reply and matching the citations.
   onReply?.();
   const { raw, model, finishReason } = readProviderResponse(config, await response.json());
-  const parsed = parseAiAnswer(raw, context);
+  // A clarifying question instead of an answer: its short note is the text, the card asks the rest.
+  const clarified = clarify && !graph ? readClarify(raw) : null;
+  if (clarified?.question) {
+    const { message } = clarified.question;
+    return { text: message, parts: [{ text: message }] as AiPart[], citations: [] as AiCitation[], model, question: clarified.question };
+  }
+  const parsed = parseAiAnswer(clarified ? clarified.rest : raw, context);
   if (!parsed.text) {
     throw new AiCallError("empty", { detail: finishReason ? `finish_reason=${sanitizeDetail(finishReason)}` : "no text in reply" });
   }
@@ -812,6 +825,8 @@ export async function runAiAnswer(
     retryDelayMs?: number;
     /** Each real stage as it happens (asking a model, a retry, a failure, a fallback, writing), for the live progress line. */
     onProgress?: (event: AiProgressEvent) => void;
+    /** The chat may answer a too-open request with a clarifying question (see ai-clarify.ts). */
+    clarify?: boolean;
   } = {},
 ): Promise<AiAnswer> {
   const env = options.env ?? process.env;
@@ -890,6 +905,7 @@ export async function runAiAnswer(
           const answer = await askProvider(
             config, query, context, fetcher, options.answerLanguage, { timeoutMs, signal: stop }, graph ?? undefined, options.history,
             () => { if (!stop?.aborted) emit({ type: "write", ...who }); },
+            options.clarify === true,
           );
           return { ...answer, config };
         } catch (error) {

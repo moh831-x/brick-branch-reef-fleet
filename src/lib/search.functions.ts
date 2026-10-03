@@ -72,7 +72,7 @@ export const answerWithAi = createServerFn({ method: "POST" })
   .handler(async ({ data }): Promise<AiAnswer> => {
     // The answer is always written in the page language, English included.
     const lang = data.lang ?? (await preferredLang());
-    return runAiAnswer(data.q, data.context, data.model, { answerLanguage: languageName(lang), history: data.history });
+    return runAiAnswer(data.q, data.context, data.model, { answerLanguage: languageName(lang), history: data.history, clarify: true });
   });
 
 /** Which AI models can run with the keys on the server, for the model menu. No keys are returned. */
