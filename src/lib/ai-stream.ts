@@ -17,7 +17,7 @@ export class StreamUnavailable extends Error {
   }
 }
 
-export type AnswerBody = { q: string; context: AiContextItem[]; history?: ChatMessage[]; model?: string; lang?: string };
+export type AnswerBody = { q: string; context: AiContextItem[]; history?: ChatMessage[]; model?: string; lang?: string; tz?: string };
 
 export async function readAnswerStream(body: AnswerBody, onEvent: (event: AiProgressEvent) => void, fetcher: typeof fetch = fetch): Promise<AiAnswer> {
   let response: Response;

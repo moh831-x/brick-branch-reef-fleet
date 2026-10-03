@@ -41,6 +41,7 @@ import {
 } from "./ai.shared.ts";
 import { AI_CLARIFY_PROMPT, readClarify } from "./ai-clarify.ts";
 import { graphAnswerBrief } from "./graph.ts";
+import { isNewsQuery, newsPrompt, todayLabel } from "./news.shared.ts";
 import { LANGS } from "./i18n.ts";
 
 type Env = Record<string, string | undefined>;
@@ -265,6 +266,10 @@ export function configForModel(modelId: string, env: Env = process.env): Provide
 
 type Request = { url: string; init: RequestInit };
 
+/** How the answer should read: `news` asks for the news format (see news.shared.ts), dated `today`. */
+/** How the system prompt is shaped: news format (with today's date) and/or the chat's clarifying-question rule. */
+export type PromptStyle = { news?: boolean; today?: string; clarify?: boolean };
+
 /** Build the HTTP request for one provider. Exported for tests; it performs no I/O. */
 export function buildProviderRequest(
   config: ProviderConfig,
@@ -273,7 +278,7 @@ export function buildProviderRequest(
   language?: string,
   graph?: string,
   history: ChatMessage[] = [],
-  clarify = false,
+  style: PromptStyle = {},
 ): Request {
   const graphNote = graph
     ? " A graph of this search is already drawn in the answer. Describe that function in plain language. Do not say the results do not answer the search. Cite a numbered result only when it is about the same function."
@@ -282,9 +287,11 @@ export function buildProviderRequest(
     ? AI_QUESTION_PROMPT.replace("No web references were supplied.", "Use the conversation to understand follow-up questions. When numbered references are supplied, use those for external facts and cite their current numbers. Do not treat previous assistant answers as verified sources.")
     : context.length ? AI_SYSTEM_PROMPT : AI_QUESTION_PROMPT;
   const messages = [...cleanChatHistory(history), { role: "user", content: buildAiPrompt(query, context, language, graph) }];
-  // A graph search is never too open: it already has a function to describe.
-  const clarifyNote = clarify && !graph ? ` ${AI_CLARIFY_PROMPT}` : "";
-  const system = `${language ? `${basePrompt} Write the entire answer in ${language}, even when the results are in another language.` : basePrompt}${graphNote}${clarifyNote}`;
+  // A news search with sources: dated intro, bold-headline bullets each ending in its sources, one follow-up offer.
+  const newsNote = style.news && context.length && !graph ? ` ${newsPrompt(style.today ?? todayLabel())}` : "";
+  // A graph search is never too open (it already has a function to describe), and neither is a news search with sources.
+  const clarifyNote = style.clarify && !graph && !newsNote ? ` ${AI_CLARIFY_PROMPT}` : "";
+  const system = `${language ? `${basePrompt} Write the entire answer in ${language}, even when the results are in another language.` : basePrompt}${graphNote}${newsNote}${clarifyNote}`;
   if (config.api === "anthropic") {
     return {
       url: `${config.baseUrl}/messages`,
@@ -770,9 +777,9 @@ async function askProvider(
   graph?: string,
   history: ChatMessage[] = [],
   onReply?: () => void,
-  clarify = false,
+  style: PromptStyle = {},
 ) {
-  const request = buildProviderRequest(config, query, context, language, graph, history, clarify);
+  const request = buildProviderRequest(config, query, context, language, graph, history, style);
   const timeout = AbortSignal.timeout(limits.timeoutMs ?? timeoutFor(config));
   const signal = limits.signal ? AbortSignal.any([timeout, limits.signal]) : timeout;
   const response = await fetcher(request.url, { ...request.init, signal });
@@ -788,7 +795,7 @@ async function askProvider(
   onReply?.();
   const { raw, model, finishReason } = readProviderResponse(config, await response.json());
   // A clarifying question instead of an answer: its short note is the text, the card asks the rest.
-  const clarified = clarify && !graph ? readClarify(raw) : null;
+  const clarified = style.clarify && !style.news && !graph ? readClarify(raw) : null;
   if (clarified?.question) {
     const { message } = clarified.question;
     return { text: message, parts: [{ text: message }] as AiPart[], citations: [] as AiCitation[], model, question: clarified.question };
@@ -825,6 +832,9 @@ export async function runAiAnswer(
     retryDelayMs?: number;
     /** Each real stage as it happens (asking a model, a retry, a failure, a fallback, writing), for the live progress line. */
     onProgress?: (event: AiProgressEvent) => void;
+    /** The reader's time zone, for "as of <today>" in a news answer. */
+    timeZone?: string;
+    now?: Date;
     /** The chat may answer a too-open request with a clarifying question (see ai-clarify.ts). */
     clarify?: boolean;
   } = {},
@@ -832,6 +842,11 @@ export async function runAiAnswer(
   const env = options.env ?? process.env;
   const fetcher = options.fetcher ?? fetch;
   const graph = graphAnswerBrief(query);
+  // A news search with sources gets the news format; that search is concrete, so it never asks a clarifying question.
+  const news = isNewsQuery(query) && context.length > 0;
+  const style: PromptStyle = news
+    ? { news: true, today: todayLabel(options.now, options.timeZone) }
+    : options.clarify === true ? { clarify: true } : {};
   const totalMs = options.totalMs ?? AI_TOTAL_MS;
   const hedgeMs = options.hedgeMs ?? AI_HEDGE_MS;
   const minCallMs = options.minCallMs ?? MIN_CALL_MS;
@@ -905,7 +920,7 @@ export async function runAiAnswer(
           const answer = await askProvider(
             config, query, context, fetcher, options.answerLanguage, { timeoutMs, signal: stop }, graph ?? undefined, options.history,
             () => { if (!stop?.aborted) emit({ type: "write", ...who }); },
-            options.clarify === true,
+            style,
           );
           return { ...answer, config };
         } catch (error) {

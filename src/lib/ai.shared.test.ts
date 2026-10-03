@@ -50,6 +50,24 @@ describe("pickAiContext", () => {
   });
 });
 
+describe("pickAiContext with news", () => {
+  it("puts news articles first, as Web results with their publisher and date", () => {
+    const picked = pickAiContext({
+      news: { results: [{ title: "Iran readies retaliation", url: "https://www.reuters.com/a", snippet: "a", site: "Reuters", published: "2026-10-02T03:00:09.000Z" }] },
+      web: { results: [hit(1)] },
+    });
+    assert.deepEqual(picked[0], { source: "web", title: "Iran readies retaliation", url: "https://www.reuters.com/a", snippet: "a", site: "Reuters", date: "Oct 2, 2026" });
+    assert.equal(picked[1]?.url, "https://example.com/1");
+    assert.equal("site" in (picked[1] ?? {}), false);
+  });
+
+  it("keeps the publisher and date a browser sends, within bounds", () => {
+    const item = cleanContextItem({ source: "web", title: "T", url: "https://a.example/", snippet: "", site: "x".repeat(200), date: "Oct 2, 2026" });
+    assert.ok(item && item.site && item.site.length <= 80);
+    assert.equal(item?.date, "Oct 2, 2026");
+  });
+});
+
 describe("pickAiContext with Images", () => {
   it("includes image results with their title and source page when Images is on", () => {
     const picked = pickAiContext({

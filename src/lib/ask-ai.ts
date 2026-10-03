@@ -11,6 +11,14 @@ export async function askAiWithProgress(
   body: AnswerBody,
   handlers: { onEvent: (event: AiProgressEvent) => void; onFallback: () => void },
 ): Promise<AiAnswer> {
+  // The reader's time zone dates a news answer ("as of October 2, 2026") on their calendar.
+  let tz: string | undefined;
+  try {
+    tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  } catch {
+    tz = undefined;
+  }
+  if (tz && !body.tz) body = { ...body, tz };
   try {
     return await readAnswerStream(body, handlers.onEvent);
   } catch (error) {
