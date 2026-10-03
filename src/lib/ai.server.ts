@@ -40,6 +40,7 @@ import {
   type AnswerProviderId,
 } from "./ai.shared.ts";
 import { AI_CLARIFY_PROMPT, readClarify } from "./ai-clarify.ts";
+import { aiSearchPrompt, readSearchRequest, searchedPrompt, type SearchedRound } from "./research.shared.ts";
 import { graphAnswerBrief } from "./graph.ts";
 import { isNewsQuery, newsPrompt, todayLabel } from "./news.shared.ts";
 import { LANGS } from "./i18n.ts";
@@ -268,7 +269,15 @@ type Request = { url: string; init: RequestInit };
 
 /** How the answer should read: `news` asks for the news format (see news.shared.ts), dated `today`. */
 /** How the system prompt is shaped: news format (with today's date) and/or the chat's clarifying-question rule. */
-export type PromptStyle = { news?: boolean; today?: string; clarify?: boolean };
+export type PromptStyle = {
+  news?: boolean;
+  today?: string;
+  clarify?: boolean;
+  /** The model may answer weak results with a better search instead (research.shared.ts). */
+  search?: boolean;
+  /** Searches already run for this answer: answer now from the combined results. */
+  searched?: SearchedRound[];
+};
 
 /** Build the HTTP request for one provider. Exported for tests; it performs no I/O. */
 export function buildProviderRequest(
@@ -291,7 +300,10 @@ export function buildProviderRequest(
   const newsNote = style.news && context.length && !graph ? ` ${newsPrompt(style.today ?? todayLabel())}` : "";
   // A graph search is never too open (it already has a function to describe), and neither is a news search with sources.
   const clarifyNote = style.clarify && !graph && !newsNote ? ` ${AI_CLARIFY_PROMPT}` : "";
-  const system = `${language ? `${basePrompt} Write the entire answer in ${language}, even when the results are in another language.` : basePrompt}${graphNote}${newsNote}${clarifyNote}`;
+  // Agentic search: judge the results first; weak ones get a better search instead of an answer.
+  const searchNote = style.search && !graph ? ` ${aiSearchPrompt(style.today)}` : "";
+  const searchedNote = style.searched?.length && !graph ? ` ${searchedPrompt(style.searched, Boolean(style.search))}` : "";
+  const system = `${language ? `${basePrompt} Write the entire answer in ${language}, even when the results are in another language.` : basePrompt}${graphNote}${newsNote}${clarifyNote}${searchNote}${searchedNote}`;
   if (config.api === "anthropic") {
     return {
       url: `${config.baseUrl}/messages`,
@@ -800,7 +812,14 @@ async function askProvider(
     const { message } = clarified.question;
     return { text: message, parts: [{ text: message }] as AiPart[], citations: [] as AiCitation[], model, question: clarified.question };
   }
-  const parsed = parseAiAnswer(clarified ? clarified.rest : raw, context);
+  // Weak results: a short note for the reader and a better query, instead of an answer. A block the
+  // model sends when it was not offered a search is dropped, never shown.
+  const searched = readSearchRequest(clarified ? clarified.rest : raw);
+  if (style.search && !graph && searched.request) {
+    const { note } = searched.request;
+    return { text: note, parts: [{ text: note }] as AiPart[], citations: [] as AiCitation[], model, search: searched.request };
+  }
+  const parsed = parseAiAnswer(searched.rest, context);
   if (!parsed.text) {
     throw new AiCallError("empty", { detail: finishReason ? `finish_reason=${sanitizeDetail(finishReason)}` : "no text in reply" });
   }
@@ -837,6 +856,12 @@ export async function runAiAnswer(
     now?: Date;
     /** The chat may answer a too-open request with a clarifying question (see ai-clarify.ts). */
     clarify?: boolean;
+    /** The model may ask for a better search instead of answering weak results (research.shared.ts). */
+    search?: boolean;
+    /** Searches already run for this answer, and where their results sit in `context`. */
+    searched?: SearchedRound[];
+    /** Progress times count from here (epoch ms) when this call is one round of a longer answer. */
+    clockStart?: number;
   } = {},
 ): Promise<AiAnswer> {
   const env = options.env ?? process.env;
@@ -844,17 +869,21 @@ export async function runAiAnswer(
   const graph = graphAnswerBrief(query);
   // A news search with sources gets the news format; that search is concrete, so it never asks a clarifying question.
   const news = isNewsQuery(query) && context.length > 0;
-  const style: PromptStyle = news
-    ? { news: true, today: todayLabel(options.now, options.timeZone) }
-    : options.clarify === true ? { clarify: true } : {};
+  const today = todayLabel(options.now, options.timeZone);
+  const style: PromptStyle = {
+    ...(news ? { news: true, today } : options.clarify === true ? { clarify: true } : {}),
+    ...(options.search === true ? { search: true, today } : {}),
+    ...(options.searched?.length ? { searched: options.searched } : {}),
+  };
   const totalMs = options.totalMs ?? AI_TOTAL_MS;
   const hedgeMs = options.hedgeMs ?? AI_HEDGE_MS;
   const minCallMs = options.minCallMs ?? MIN_CALL_MS;
   const retryDelayMs = options.retryDelayMs ?? RETRY_DELAY_MS;
   const started = Date.now();
+  const clock = options.clockStart ?? started;
   const emit = (event: AiProgressInput) => {
     try {
-      options.onProgress?.({ ...event, at: Date.now() - started } as AiProgressEvent);
+      options.onProgress?.({ ...event, at: Date.now() - clock } as AiProgressEvent);
     } catch {
       // Progress is a nicety: a listener that throws never breaks the answer.
     }

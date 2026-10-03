@@ -719,3 +719,34 @@ describe("clarifying questions", () => {
     assert.equal(answer.citations.length, 1);
   });
 });
+
+describe("agentic search prompt", () => {
+  const system = (init: RequestInit) => String((body(init).messages as Array<{ role: string; content: string }>)[0]?.content);
+  const grok = () => readProviderConfig("grok", ALL)!;
+  it("offers the search check only when asked, and never for a graph", () => {
+    assert.match(system(buildProviderRequest(grok(), "iran news", context, undefined, undefined, [], { search: true, today: "October 2, 2026" }).init), /Search quality check \(today is October 2, 2026\)/);
+    assert.doesNotMatch(system(buildProviderRequest(grok(), "iran news", context).init), /<search>/);
+    assert.doesNotMatch(system(buildProviderRequest(grok(), "y = x^2", context, undefined, "y = x^2", [], { search: true, searched: [{ query: "q", from: 3, to: 4 }] }).init), /<search>|searched the web again/);
+  });
+
+  it("returns the search request instead of an answer, and drops a block it was not offered", async () => {
+    const reply = '<search>{"note":"Weak results. Let me try again.","query":"better query"}</search>';
+    const fetcher = (async () => Response.json({ model: "grok-test", choices: [{ message: { content: reply } }] })) as unknown as typeof fetch;
+    const asked = await runAiAnswer("iran news", context, "grok", { env: ALL, fetcher, search: true });
+    assert.ok(asked.status === "ok");
+    assert.deepEqual(asked.search, { note: "Weak results. Let me try again.", query: "better query" });
+    assert.equal(asked.text, "Weak results. Let me try again.");
+    const mixed = (async () => Response.json({ model: "grok-test", choices: [{ message: { content: `Answer [1]. ${reply}` } }] })) as unknown as typeof fetch;
+    const plain = await runAiAnswer("iran news", context, "grok", { env: ALL, fetcher: mixed });
+    assert.ok(plain.status === "ok");
+    assert.equal(plain.search, undefined);
+    assert.doesNotMatch(plain.text, /<search>|better query/);
+  });
+
+  it("dates progress from the start of the whole answer", async () => {
+    const { fetcher } = fakeFetch();
+    const events: AiProgressEvent[] = [];
+    await runAiAnswer("dogs", context, "grok", { env: ALL, fetcher, clockStart: Date.now() - 5000, onProgress: (event) => events.push(event) });
+    assert.ok(events[0]!.at >= 5000);
+  });
+});
