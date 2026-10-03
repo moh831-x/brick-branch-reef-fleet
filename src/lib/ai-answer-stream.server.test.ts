@@ -74,4 +74,24 @@ describe("streamed AI answer", () => {
     const cut = (async () => new Response('{"type":"progress","event":{"type":"ask","model":"m","provider":"grok","fallback":false,"at":1}}\n', { headers: { "content-type": "application/x-ndjson" } })) as typeof fetch;
     await assert.rejects(readAnswerStream({ q: "dogs", context: [] }, () => {}, cut), (error: unknown) => error instanceof Error && !(error instanceof StreamUnavailable));
   });
+
+  it("sends a clarifying question as its own line before the answer, and the reader puts it back", async () => {
+    const question = { message: "What should it do?", question: "What kind of code?", options: [{ label: "Script", description: "A main()" }, { label: "Web", description: "An API call" }, { label: "Data", description: "CSV files" }], suggestions: ["Learn Python basics"] };
+    let asked: boolean | undefined;
+    const clarifyRun = (async (_q, _context, _model, options) => {
+      asked = options?.clarify;
+      return { status: "ok", text: question.message, parts: [{ text: question.message }], citations: [], model: "grok-4.3", provider: "grok", failed: [], question };
+    }) as typeof runAiAnswer;
+    const text = await (await streamAiAnswer(post({ q: "write a python code", context: [] }), clarifyRun)).text();
+    const lines = text.trim().split("\n").map((line) => JSON.parse(line));
+    assert.equal(asked, true, "the chat stream allows clarifying questions");
+    assert.deepEqual(lines.map((line) => line.type), ["question", "answer"]);
+    assert.equal(lines[0].question.question, "What kind of code?");
+    assert.equal(lines[1].answer.question, undefined);
+    assert.equal(lines[1].answer.text, "What should it do?");
+    const fetcher = (async (_url: string | URL | Request, init?: RequestInit) =>
+      streamAiAnswer(new Request("http://local/api/ai-answer", { method: "POST", headers: { "content-type": "application/json" }, body: init?.body as string }), clarifyRun)) as typeof fetch;
+    const answer = await readAnswerStream({ q: "write a python code", context: [] }, () => {}, fetcher);
+    assert.equal(answer.status === "ok" ? answer.question?.options.length : 0, 3);
+  });
 });
