@@ -59,6 +59,7 @@ import { clickAction, factsOf, trackPresses } from "@/lib/select-click";
 import { useLang } from "@/lib/lang-context";
 import { MIN_CONTENTS } from "@/lib/reader";
 import { LanguagePicker } from "@/components/language-picker";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { shareNative, tap, useIsNativeApp } from "@/lib/native";
 
 type Sources = { web: boolean; wiki: boolean; grok: boolean; images: boolean; ai: boolean };
@@ -550,7 +551,11 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
         {barPlaceholder}
       </label>
       <div
-        className={`flex items-center gap-2 rounded-3xl border border-line bg-surface px-3 focus-within:border-accent ${onResults ? "min-h-24 flex-wrap py-2" : "min-h-14"}`}
+        className={`flex items-center gap-2 px-2 ${
+          onResults
+            ? "min-h-24 flex-wrap rounded-desk border border-line bg-surface py-2 sm:px-3"
+            : "min-h-14 rounded-field bg-bg focus-within:ring-2 focus-within:ring-accent sm:px-3"
+        }`}
         onMouseDown={(event) => {
           const target = event.target as HTMLElement;
           if (target.closest("button, input, textarea")) return;
@@ -627,7 +632,7 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
           type="submit"
           disabled={!draft.trim() || Boolean(barTarget?.target.pending)}
           aria-label={following ? chatWords.send : copy.search}
-          className="inline-flex size-11 shrink-0 items-center justify-center rounded-full bg-ink text-bg transition-transform duration-150 ease-out active:scale-[0.96] disabled:opacity-40"
+          className="inline-flex size-11 shrink-0 items-center justify-center rounded-full bg-accent text-surface transition-transform duration-150 ease-out active:scale-[0.96] disabled:opacity-40"
         >
           <ArrowUp className="size-4" />
         </button>
@@ -636,7 +641,7 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
         <div
           id={listId}
           role="listbox"
-          className={`absolute right-0 left-0 z-30 max-h-[50vh] overflow-y-auto rounded-2xl border border-line bg-surface ${onResults ? "bottom-full mb-2" : "mt-2"}`}
+          className={`absolute right-0 left-0 z-30 max-h-[50vh] overflow-y-auto rounded-desk border border-line bg-surface shadow-desk ${onResults ? "bottom-full mb-2" : "mt-2"}`}
         >
           {typing ? (
             suggestions.map((item, index) => (
@@ -739,9 +744,9 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
   );
 
   const sourcePills = (
-    <div className={onResults ? "flex shrink-0 gap-2 whitespace-nowrap pb-1" : "flex flex-wrap gap-2"}>
+    <div className={onResults ? "flex shrink-0 gap-2 whitespace-nowrap pb-1" : "grid grid-cols-2 gap-2 sm:grid-cols-4"}>
       {(Object.keys(SOURCE_META) as PillId[]).map((key) => (
-        <SourcePill key={key} id={key} on={sources[key]} copy={copy} onToggle={() => toggle(key)} />
+        <SourcePill key={key} id={key} on={sources[key]} copy={copy} onToggle={() => toggle(key)} panel={!onResults} />
       ))}
     </div>
   );
@@ -756,11 +761,16 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
         <>
           <header className="border-b border-line bg-bg px-4 py-3 sm:px-6">
             <div className="mx-auto flex max-w-3xl items-center justify-between gap-4">
-              <button type="button" onClick={goHome} className="min-h-11 font-display text-2xl text-ink">Folio</button>
-              <LanguagePicker />
+              <button type="button" onClick={goHome} className="min-h-11 font-display text-3xl leading-none tracking-tight text-ink italic">
+                Folio
+              </button>
+              <div className="flex shrink-0 items-center gap-2">
+                <ThemeToggle />
+                <LanguagePicker />
+              </div>
             </div>
           </header>
-          <div ref={barRef} className="fixed inset-x-0 bottom-0 z-30 bg-bg px-3 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+          <div ref={barRef} className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-bg px-3 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
             <div className="mx-auto max-w-3xl">
               {barQuestion ? (
                 <ClarifyCard key={barQuestion.key} question={barQuestion.value} lang={uiLang} onAnswer={answerQuestion} onDismiss={barQuestion.dismiss} />
@@ -772,45 +782,60 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
         </>
       ) : (
         <>
-        <header className="flex min-h-screen flex-col items-center bg-bg px-4 pt-[18vh]">
-          <div className="fixed top-4 end-4 z-30">
-            <LanguagePicker />
-          </div>
-          <h1 className="mb-6 max-w-xl text-center font-display text-4xl leading-tight tracking-tight text-ink sm:text-5xl">
-            {copy.h1}
-          </h1>
-          <div className="w-full max-w-xl">{searchForm}</div>
-          <p className="mt-4 max-w-xl text-center text-sm leading-relaxed text-muted">
-            {copy.blurb}
-          </p>
-          {!anySource ? (
-            <div className="mt-4 w-full max-w-xl">
-              <p className="mb-2 text-sm text-accent">{questionCopy(uiLang).noSources}</p>
-              {sourcePills}
+          <header className="mx-auto flex w-full max-w-3xl items-end justify-between gap-4 px-4 pt-6 sm:pt-8">
+            <div>
+              <p className="font-display text-5xl leading-none tracking-tight text-ink italic sm:text-6xl">Folio</p>
+              <p className="mt-2 text-sm text-muted">Zip1</p>
             </div>
-          ) : null}
-        </header>
-        <section aria-labelledby="how-folio" className="mx-auto max-w-xl px-4 pb-16">
-          <h2 id="how-folio" className="font-display text-2xl text-ink">
-            {copy.howTitle}
-          </h2>
-          <div className="mt-3 grid gap-3 text-sm leading-relaxed text-muted">
-            <p>{copy.how1}</p>
-            <p>{copy.howGraph}</p>
-            <p>{copy.how2}</p>
-            <p>
-              {copy.how3before}{" "}
-              <Link to="/how-to-search" className="text-accent">
-                {copy.howTo}
-              </Link>{" "}
-              {copy.how3mid}{" "}
-              <Link to="/about" className="text-accent">
-                {copy.about}
-              </Link>{" "}
-              {copy.how3after}
-            </p>
+            <div className="flex shrink-0 items-center gap-2">
+              <ThemeToggle />
+              <LanguagePicker />
+            </div>
+          </header>
+          <div className="mx-auto w-full max-w-3xl px-4 pt-8 sm:pt-12">
+            <div className="rounded-desk border border-line bg-surface p-3 shadow-desk sm:p-4">
+              <div className="px-3 pt-2 pb-4 sm:px-4 sm:pt-3">
+                <h1 className="max-w-xl font-display text-3xl leading-tight tracking-tight text-ink sm:text-4xl">
+                  {copy.h1}
+                </h1>
+                <p className="mt-3 max-w-prose text-sm leading-relaxed text-muted sm:text-base">{copy.blurb}</p>
+              </div>
+              {searchForm}
+              {!anySource ? <p className="mt-3 px-3 text-sm text-accent">{questionCopy(uiLang).noSources}</p> : null}
+              <div className="mt-3">{sourcePills}</div>
+            </div>
           </div>
-        </section>
+          <section aria-labelledby="how-folio" className="mx-auto mt-16 w-full max-w-3xl px-4 pb-4 sm:mt-20">
+            <h2 id="how-folio" className="font-display text-2xl tracking-tight text-ink">
+              {copy.howTitle}
+            </h2>
+            <div className="mt-6 grid gap-8 sm:grid-cols-2">
+              <p className="text-sm leading-relaxed text-muted">
+                <span className="mb-2 block font-display text-lg text-accent">01</span>
+                {copy.how1}
+              </p>
+              <p className="text-sm leading-relaxed text-muted">
+                <span className="mb-2 block font-display text-lg text-accent">02</span>
+                {copy.howGraph}
+              </p>
+              <p className="text-sm leading-relaxed text-muted">
+                <span className="mb-2 block font-display text-lg text-accent">03</span>
+                {copy.how2}
+              </p>
+              <p className="text-sm leading-relaxed text-muted">
+                <span className="mb-2 block font-display text-lg text-accent">04</span>
+                {copy.how3before}{" "}
+                <Link to="/how-to-search" className="font-medium text-accent">
+                  {copy.howTo}
+                </Link>{" "}
+                {copy.how3mid}{" "}
+                <Link to="/about" className="font-medium text-accent">
+                  {copy.about}
+                </Link>{" "}
+                {copy.how3after}
+              </p>
+            </div>
+          </section>
         </>
       )}
       {onResults ? (
@@ -840,22 +865,55 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
   );
 }
 
-function SourcePill({ id, on, copy, onToggle }: { id: PillId; on: boolean; copy: UiCopy; onToggle: () => void }) {
+function SourcePill({
+  id,
+  on,
+  copy,
+  onToggle,
+  panel = false,
+}: {
+  id: PillId;
+  on: boolean;
+  copy: UiCopy;
+  onToggle: () => void;
+  panel?: boolean;
+}) {
   const meta = SOURCE_META[id];
   const Icon = meta.icon;
+  if (panel) {
+    return (
+      <button
+        type="button"
+        aria-pressed={on}
+        onClick={onToggle}
+        className={`flex min-h-16 flex-col items-start justify-center gap-1 rounded-field px-3 text-start transition-colors duration-150 ease-out active:scale-[0.98] ${
+          on ? "bg-accent-soft text-ink" : "bg-bg text-muted"
+        }`}
+      >
+        <span className="flex items-center gap-2 text-sm">
+          <Icon className="size-4 shrink-0" aria-hidden="true" />
+          {sourceLabel(copy, id)}
+        </span>
+        <span className={`text-xs ${on ? "text-accent" : "text-muted"}`}>
+          {on ? copy.on : copy.off}
+          {meta.optional ? <span> · {copy.optional}</span> : null}
+        </span>
+      </button>
+    );
+  }
   return (
     <button
       type="button"
       aria-pressed={on}
       onClick={onToggle}
-      className={`inline-flex min-h-11 shrink-0 items-center gap-2 whitespace-nowrap rounded-full border px-3 text-sm transition-transform duration-150 ease-out active:scale-[0.96] ${
+      className={`inline-flex min-h-11 shrink-0 items-center gap-2 whitespace-nowrap rounded-full border px-3.5 text-sm transition-colors duration-150 ease-out active:scale-[0.98] ${
         on ? "border-accent bg-accent-soft text-ink" : "border-line bg-surface text-muted"
       }`}
     >
       <Icon className="size-4" aria-hidden="true" />
       {sourceLabel(copy, id)}
       {meta.optional ? <span className="text-xs text-muted">{copy.optional}</span> : null}
-      <span className="font-medium">{on ? copy.on : copy.off}</span>
+      <span className={`font-medium ${on ? "text-accent" : ""}`}>{on ? copy.on : copy.off}</span>
     </button>
   );
 }
@@ -1137,7 +1195,7 @@ function Results({
   if (!data) {
     return (
       <div className="grid gap-4" aria-busy="true">
-        <h1 className="font-display text-4xl text-ink">{query}</h1>
+        <h1 className="font-display text-4xl leading-tight tracking-tight break-words text-ink">{query}</h1>
         {aiCard}
         <Skeleton />
       </div>
@@ -1151,7 +1209,7 @@ function Results({
     <div className={loading ? "opacity-70" : undefined}>
       <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="font-display text-4xl text-ink sm:text-5xl">{query}</h1>
+          <h1 className="font-display text-4xl leading-tight tracking-tight break-words text-ink sm:text-5xl">{query}</h1>
           {data.webSearched && sources.web ? <SearchedAs label={copy.webSearchedAs} text={data.webSearched} /> : null}
           {data.searched && sources.wiki ? <SearchedAs label={copy.searchedAs} text={data.searched} /> : null}
           {data.grokSearched && sources.grok ? <SearchedAs label={copy.grokSearchedAs} text={data.grokSearched} /> : null}
@@ -1217,10 +1275,10 @@ function Results({
                     }}
                   />
                 ) : (
-                  <ul className="grid grid-cols-[minmax(0,1fr)]">
+                  <ul className="grid gap-2">
                     {block.hits.map((hit, index) => (
                       <Fragment key={hit.id}>
-                        <li className={`border-b border-line ${hit.id === openId ? "bg-accent-soft" : ""}`}>
+                        <li className={`rounded-2xl border bg-surface ${hit.id === openId ? "border-accent bg-accent-soft" : "border-line"}`}>
                           <div className="flex items-start gap-1">
                             {/* Plain text, not a button: browsers will not start a text selection inside a button.
                                 The title link opens the preview on a plain click; a drag or selection never does. */}
@@ -1243,7 +1301,7 @@ function Results({
                                   <Highlight text={hit.title} query={query} />
                                 </SelectableLink>
                               </p>
-                              <p dir="ltr" className="mt-1 break-all text-xs text-muted">{hit.url}</p>
+                              <p dir="ltr" className="mt-1 truncate text-xs text-muted">{hit.url}</p>
                               {hit.snippet ? (
                                 <p dir="auto" className="mt-1 line-clamp-2 text-sm leading-relaxed text-muted">
                                   <Highlight text={hit.snippet} query={query} />
@@ -1263,7 +1321,7 @@ function Results({
                           </div>
                         </li>
                         {block.key === "web" && index === 0 && block.page === 1 && data.deepDive.length > 0 ? (
-                          <li className="border-b border-line py-4">
+                          <li className="rounded-2xl border border-line bg-surface px-4 py-4">
                             <DeepDive topic={query} items={data.deepDive} copy={copy} onPick={onDive} />
                           </li>
                         ) : null}
@@ -1497,7 +1555,7 @@ function AiAnswerCard({
     <section
       aria-labelledby="ai-answer"
       aria-busy={pending}
-      className="py-4 sm:py-5"
+      className="rounded-desk border border-line bg-surface px-5 py-5 shadow-desk sm:px-6"
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 id="ai-answer" className="flex items-center gap-2 font-display text-xl text-ink">
@@ -2614,7 +2672,7 @@ function ResultPeek({
 
   return (
     <div className="fixed inset-0 z-40">
-      <button type="button" aria-label={copy.close} onClick={onClose} className="absolute inset-0 bg-ink/35" />
+      <button type="button" aria-label={copy.close} onClick={onClose} className="absolute inset-0 bg-scrim/45" />
       <aside
         role="dialog"
         aria-modal="true"

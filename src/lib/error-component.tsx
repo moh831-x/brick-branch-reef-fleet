@@ -37,31 +37,28 @@ export function AppErrorComponent({ error, reset }: ErrorComponentProps) {
   return (
     <main
       role="alert"
-      className={
-        "flex min-h-screen flex-col items-center justify-center gap-3 px-6 text-center " +
-        "bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-50"
-      }
+      className="flex min-h-screen flex-col items-center justify-center gap-3 bg-bg px-6 text-center text-ink"
     >
       <span className="text-red-500" aria-hidden="true">
         <TriangleAlert className="size-10" strokeWidth={2} />
       </span>
       <h1 className="text-lg font-semibold">{copy.errorTitle}</h1>
-      {foreignDom ? <p className="max-w-md text-sm text-zinc-600 dark:text-zinc-300">{copy.errorTranslateHint}</p> : null}
-      <p className="max-w-md text-xs break-words text-zinc-500 dark:text-zinc-400" dir="ltr" lang="en" translate="no">
+      {foreignDom ? <p className="max-w-md text-sm text-muted">{copy.errorTranslateHint}</p> : null}
+      <p className="max-w-md text-xs break-words text-muted" dir="ltr" lang="en" translate="no">
         {message}
       </p>
       <div className="mt-2 flex flex-wrap items-center justify-center gap-2">
         <button
           type="button"
           onClick={retry}
-          className="inline-flex min-h-11 items-center gap-2 rounded-full bg-zinc-900 px-5 text-sm font-medium text-zinc-50 dark:bg-zinc-50 dark:text-zinc-900"
+          className="inline-flex min-h-11 items-center gap-2 rounded-full bg-ink px-5 text-sm font-medium text-bg"
         >
           <RotateCw className="size-4" aria-hidden="true" />
           {copy.errorRetry}
         </button>
         <a
           href="/"
-          className="inline-flex min-h-11 items-center rounded-full border border-zinc-300 px-5 text-sm font-medium dark:border-zinc-700"
+          className="inline-flex min-h-11 items-center rounded-full border border-line px-5 text-sm font-medium text-ink"
         >
           {copy.errorHome}
         </a>
