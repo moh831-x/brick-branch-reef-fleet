@@ -21,6 +21,7 @@ import {
   runAiAnswer,
 } from "./ai.server.ts";
 import type { AiContextItem } from "./ai.shared.ts";
+import type { AiProgressEvent } from "./ai-progress.ts";
 
 const context: AiContextItem[] = [
   { source: "web", title: "One", url: "https://a.example/1", snippet: "First result." },
@@ -211,6 +212,58 @@ describe("runAiAnswer", () => {
     assert.equal(answer.status, "error");
     assert.deepEqual(answer.status === "error" ? answer.failed : [], ["openai", "claude"]);
     assert.equal(calls.length, 4, "each 500 is retried once");
+  });
+});
+
+describe("runAiAnswer progress", () => {
+  it("reports asking the pick, writing, and nothing else when the pick answers", async () => {
+    const { fetcher } = fakeFetch();
+    const events: AiProgressEvent[] = [];
+    const answer = await runAiAnswer("dogs", context, "grok-4.7", { env: ALL, fetcher, onProgress: (event) => events.push(event) });
+    assert.equal(answer.status, "ok");
+    assert.deepEqual(events.map((event) => [event.type, event.model]), [["ask", "grok-4.7"], ["write", "grok-4.7"]]);
+    assert.equal(events[0]?.type === "ask" && events[0].fallback, false);
+    assert.ok(events.every((event) => event.at >= 0));
+  });
+
+  it("reports the retry, the failure, and the fallback model in order", async () => {
+    const { fetcher } = fakeFetch(["grok"]);
+    const events: AiProgressEvent[] = [];
+    await runAiAnswer("dogs", context, undefined, { env: ALL, fetcher, retryDelayMs: 0, onProgress: (event) => events.push(event) });
+    assert.deepEqual(events.map((event) => event.type), ["ask", "retry", "failed", "ask", "write"]);
+    const failed = events[2];
+    assert.ok(failed?.type === "failed" && failed.kind === "server" && failed.provider === "grok");
+    const fallback = events[3];
+    assert.ok(fallback?.type === "ask" && fallback.fallback && fallback.provider === "openai");
+  });
+
+  it("reports a pick that is not set up before asking the next model", async () => {
+    const { fetcher } = fakeFetch();
+    const events: AiProgressEvent[] = [];
+    await runAiAnswer("dogs", context, "grok-4.7", { env: { OPENAI_API_KEY: "o" }, fetcher, onProgress: (event) => events.push(event) });
+    assert.deepEqual(events.map((event) => event.type), ["failed", "ask", "write"]);
+    assert.ok(events[0]?.type === "failed" && events[0].kind === "unavailable");
+    assert.ok(events[1]?.type === "ask" && events[1].fallback);
+  });
+
+  it("reports when a slow pick gets a parallel fallback", async () => {
+    const fetcher = (async (url: string | URL) => {
+      const slow = String(url).includes("x.ai");
+      await new Promise((resolve) => setTimeout(resolve, slow ? 80 : 5));
+      return Response.json({ model: slow ? "grok-4.7" : "gpt", choices: [{ message: { content: "Hi [1]." } }] });
+    }) as typeof fetch;
+    const events: AiProgressEvent[] = [];
+    const answer = await runAiAnswer("dogs", context, "grok-4.7", { env: ALL, fetcher, hedgeMs: 20, onProgress: (event) => events.push(event) });
+    assert.ok(answer.status === "ok" && answer.provider === "grok", "the pick still wins inside its limit");
+    assert.deepEqual(events.slice(0, 3).map((event) => [event.type, event.model]), [["ask", "grok-4.7"], ["hedge", "grok-4.7"], ["ask", "grok-4.3"]]);
+    assert.ok(events[2]?.type === "ask" && !events[2].fallback, "asked alongside, not after a failure");
+    assert.ok(events.some((event) => event.type === "write" && event.model === "grok-4.7"));
+  });
+
+  it("never lets a throwing listener break the answer", async () => {
+    const { fetcher } = fakeFetch();
+    const answer = await runAiAnswer("dogs", context, "claude", { env: ALL, fetcher, onProgress: () => { throw new Error("listener"); } });
+    assert.equal(answer.status, "ok");
   });
 });
 
@@ -565,4 +618,30 @@ describe("direct questions without references", () => {
     const sent = body(request.init);
     assert.match((sent.messages as { content: string }[])[0].content, /Use only the numbered search results/);
   });
+});
+
+describe("conversational provider requests", () => {
+  it("sends prior user and assistant turns to each provider before the new question", () => {
+    const history = [{ role: "user" as const, content: "My name is Sam" }, { role: "assistant" as const, content: "Hello Sam" }];
+    for (const provider of ["grok", "openai", "claude"] as const) {
+      const request = buildProviderRequest(readProviderConfig(provider, ALL)!, "What is my name?", [], "English", undefined, history);
+      const payload = body(request.init);
+      const messages = payload.messages as { role: string; content: string }[];
+      const offset = provider === "claude" ? 0 : 1;
+      assert.deepEqual(messages.slice(offset, offset + 2), history);
+      assert.ok(messages.at(-1)?.content.includes("What is my name?"));
+      const system = String(provider === "claude" ? payload.system : messages[0].content);
+      assert.ok(system.includes("Use the conversation"));
+    }
+  });
+});
+
+it("runAiAnswer carries conversation history into the actual provider request", async () => {
+  const { fetcher, calls } = fakeFetch();
+  const history = [{ role: "user" as const, content: "Remember the number 27." }, { role: "assistant" as const, content: "I will remember 27." }];
+  const result = await runAiAnswer("Double that number.", [], "grok-4.3", { env: { XAI_API_KEY: "x-key" }, fetcher, history });
+  assert.equal(result.status, "ok");
+  const messages = calls[0].body.messages as { role: string; content: string }[];
+  assert.deepEqual(messages.slice(1, 3), history);
+  assert.ok(messages.at(-1)?.content.includes("Double that number."));
 });

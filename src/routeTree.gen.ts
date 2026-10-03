@@ -13,6 +13,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as AboutRouteImport } from './routes/about'
 import { Route as HowToSearchRouteImport } from './routes/how-to-search'
 import { Route as PrivacyRouteImport } from './routes/privacy'
+import { Route as ApiAiAnswerRouteImport } from './routes/api/ai-answer'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -34,18 +35,25 @@ const PrivacyRoute = PrivacyRouteImport.update({
   path: '/privacy',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiAiAnswerRoute = ApiAiAnswerRouteImport.update({
+  id: '/api/ai-answer',
+  path: '/api/ai-answer',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
   '/how-to-search': typeof HowToSearchRoute
   '/privacy': typeof PrivacyRoute
+  '/api/ai-answer': typeof ApiAiAnswerRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
   '/how-to-search': typeof HowToSearchRoute
   '/privacy': typeof PrivacyRoute
+  '/api/ai-answer': typeof ApiAiAnswerRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -53,13 +61,20 @@ export interface FileRoutesById {
   '/about': typeof AboutRoute
   '/how-to-search': typeof HowToSearchRoute
   '/privacy': typeof PrivacyRoute
+  '/api/ai-answer': typeof ApiAiAnswerRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/about' | '/how-to-search' | '/privacy'
+  fullPaths: '/' | '/about' | '/how-to-search' | '/privacy' | '/api/ai-answer'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/about' | '/how-to-search' | '/privacy'
-  id: '__root__' | '/' | '/about' | '/how-to-search' | '/privacy'
+  to: '/' | '/about' | '/how-to-search' | '/privacy' | '/api/ai-answer'
+  id:
+    | '__root__'
+    | '/'
+    | '/about'
+    | '/how-to-search'
+    | '/privacy'
+    | '/api/ai-answer'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -67,6 +82,7 @@ export interface RootRouteChildren {
   AboutRoute: typeof AboutRoute
   HowToSearchRoute: typeof HowToSearchRoute
   PrivacyRoute: typeof PrivacyRoute
+  ApiAiAnswerRoute: typeof ApiAiAnswerRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -99,6 +115,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PrivacyRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/ai-answer': {
+      id: '/api/ai-answer'
+      path: '/api/ai-answer'
+      fullPath: '/api/ai-answer'
+      preLoaderRoute: typeof ApiAiAnswerRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -107,6 +130,7 @@ const rootRouteChildren: RootRouteChildren = {
   AboutRoute: AboutRoute,
   HowToSearchRoute: HowToSearchRoute,
   PrivacyRoute: PrivacyRoute,
+  ApiAiAnswerRoute: ApiAiAnswerRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

@@ -1,16 +1,25 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
+import { usePromptBridge } from "@/components/prompt-bridge";
 import { Download, ImageIcon, Loader2, X } from "lucide-react";
 import { createAnswerImage, imageCreationStatus } from "@/lib/image.functions";
 import { imageCopy } from "@/lib/image-copy";
 import type { ImageRatio, ImageResult } from "@/lib/image.shared";
 import type { UiLang } from "@/lib/i18n";
 
+const PROMPT_MAX = 1000;
+
+/**
+ * Create an image for this search. There is no text box here: all prompts share the search bar.
+ * Opening this panel puts the bar in image mode, so a description typed there (Enter) creates the
+ * image; the button creates one from the current prompt, which starts as the search itself.
+ */
 export function AnswerImage({ query, answer, lang }: { query: string; answer?: string; lang: UiLang }) {
   const copy = imageCopy(lang);
   const id = useId();
   const [open, setOpen] = useState(false);
   const [available, setAvailable] = useState<boolean | null>(null);
-  const [prompt, setPrompt] = useState(query.slice(0, 1000));
+  const [prompt, setPrompt] = useState(query.slice(0, PROMPT_MAX));
+  useEffect(() => { if (!open) setPrompt(query.slice(0, PROMPT_MAX)); }, [query, open]);
   const [ratio, setRatio] = useState<ImageRatio>("1:1");
   const [useAnswer, setUseAnswer] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -28,18 +37,52 @@ export function AnswerImage({ query, answer, lang }: { query: string; answer?: s
     return () => { cancelled = true; };
   }, [open, available]);
 
-  async function create(event: FormEvent) {
-    event.preventDefault();
-    if (running.current || !available || !prompt.trim()) return;
+  const bridge = usePromptBridge();
+  const latest = useRef({ ratio, useAnswer, answer, available });
+  latest.current = { ratio, useAnswer, answer, available };
+
+  async function run(text: string) {
+    const value = text.trim().slice(0, PROMPT_MAX);
+    if (running.current || !latest.current.available || !value) return false;
     running.current = true;
+    setPrompt(value);
     setBusy(true);
     setResult(null);
     try {
-      const next = await createAnswerImage({ data: { prompt, ratio, answer: useAnswer ? answer ?? "" : "" } });
+      const { ratio: shape, useAnswer: withAnswer, answer: context } = latest.current;
+      const next = await createAnswerImage({ data: { prompt: value, ratio: shape, answer: withAnswer ? context ?? "" : "" } });
       if (alive.current) setResult(next);
     } catch { if (alive.current) setResult({ status: "error" }); }
     finally { running.current = false; if (alive.current) setBusy(false); }
+    return true;
   }
+  const runRef = useRef(run);
+  runRef.current = run;
+
+  function create(event: FormEvent) {
+    event.preventDefault();
+    void run(prompt);
+  }
+
+  // While the panel is open, the search bar takes the image description.
+  useEffect(() => {
+    if (!open || !bridge) return;
+    bridge.register(id, {
+      kind: "image",
+      pending: busy || available !== true,
+      maxLength: PROMPT_MAX,
+      submit: (text) => {
+        if (running.current || !latest.current.available) return false;
+        void runRef.current(text);
+        return true;
+      },
+    });
+  }, [open, bridge, id, busy, available]);
+  useEffect(() => {
+    if (!open || !bridge) return;
+    bridge.activate(id);
+    return () => bridge.unregister(id);
+  }, [open, bridge, id]);
 
   return (
     <div className="mt-4 border-t border-line pt-3">
@@ -48,13 +91,14 @@ export function AnswerImage({ query, answer, lang }: { query: string; answer?: s
       </button>
       {open ? <div id={id} className="mt-3 rounded-2xl bg-bg p-4">
         <div className="flex items-start justify-between gap-3">
-          <p className="text-sm text-muted">{copy.hint}</p>
+          <p className="text-sm text-muted">{bridge ? copy.barHint : copy.hint}</p>
           <button type="button" aria-label={copy.close} onClick={() => setOpen(false)} className="flex size-11 shrink-0 items-center justify-center rounded-full text-muted hover:bg-surface"><X className="size-4" aria-hidden="true" /></button>
         </div>
         <form onSubmit={create} className="grid gap-3">
-          <label className="grid gap-2 text-sm text-ink" htmlFor={`${id}-prompt`}>{copy.prompt}
-            <textarea id={`${id}-prompt`} value={prompt} onChange={event => setPrompt(event.target.value)} maxLength={1000} rows={3} required disabled={busy} className="w-full resize-y rounded-xl border border-line bg-surface p-3 text-ink focus:outline focus:outline-2 focus:outline-accent" />
-          </label>
+          <p className="grid gap-1 text-sm">
+            <span className="text-muted">{copy.prompt}</span>
+            <span dir="auto" className="whitespace-pre-wrap break-words border-s-2 border-accent ps-3 text-ink">{prompt}</span>
+          </p>
           <div className="flex flex-wrap items-center justify-between gap-3">
             <label className="flex items-center gap-2 text-sm text-ink">{copy.shape}
               <select value={ratio} disabled={busy} onChange={event => setRatio(event.target.value as ImageRatio)} className="min-h-11 rounded-xl border border-line bg-surface px-3 text-ink">

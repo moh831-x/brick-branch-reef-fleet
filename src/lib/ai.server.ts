@@ -1,3 +1,5 @@
+import { cleanChatHistory, type ChatMessage } from "./chat.shared.ts";
+import type { AiProgressEvent, AiProgressInput } from "./ai-progress.ts";
 /**
  * Server-only providers for the optional AI answer. Keys are read from the server environment
  * and never reach the browser.
@@ -267,13 +269,16 @@ export function buildProviderRequest(
   context: AiContextItem[],
   language?: string,
   graph?: string,
+  history: ChatMessage[] = [],
 ): Request {
   const graphNote = graph
     ? " A graph of this search is already drawn in the answer. Describe that function in plain language. Do not say the results do not answer the search. Cite a numbered result only when it is about the same function."
     : "";
-  const basePrompt = context.length ? AI_SYSTEM_PROMPT : AI_QUESTION_PROMPT;
+  const basePrompt = history.length
+    ? AI_QUESTION_PROMPT.replace("No web references were supplied.", "Use the conversation to understand follow-up questions. When numbered references are supplied, use those for external facts and cite their current numbers. Do not treat previous assistant answers as verified sources.")
+    : context.length ? AI_SYSTEM_PROMPT : AI_QUESTION_PROMPT;
+  const messages = [...cleanChatHistory(history), { role: "user", content: buildAiPrompt(query, context, language, graph) }];
   const system = `${language ? `${basePrompt} Write the entire answer in ${language}, even when the results are in another language.` : basePrompt}${graphNote}`;
-  const prompt = buildAiPrompt(query, context, language, graph);
   if (config.api === "anthropic") {
     return {
       url: `${config.baseUrl}/messages`,
@@ -288,7 +293,7 @@ export function buildProviderRequest(
           model: config.model,
           max_tokens: outputBudget(config),
           system,
-          messages: [{ role: "user", content: prompt }],
+          messages,
           ...(config.effort ? { output_config: { effort: config.effort } } : {}),
         }),
       },
@@ -306,7 +311,7 @@ export function buildProviderRequest(
           // "system" works on xAI, OpenAI (treated as developer instructions on reasoning models), and
           // other OpenAI-compatible endpoints.
           { role: "system", content: system },
-          { role: "user", content: prompt },
+          ...messages,
         ],
         // The AI Gateway documents `max_tokens` and maps it per provider (to max_completion_tokens for
         // OpenAI reasoning models). OpenAI itself rejects temperature and max_tokens on reasoning
@@ -757,8 +762,10 @@ async function askProvider(
   language?: string,
   limits: { timeoutMs?: number; signal?: AbortSignal } = {},
   graph?: string,
+  history: ChatMessage[] = [],
+  onReply?: () => void,
 ) {
-  const request = buildProviderRequest(config, query, context, language, graph);
+  const request = buildProviderRequest(config, query, context, language, graph, history);
   const timeout = AbortSignal.timeout(limits.timeoutMs ?? timeoutFor(config));
   const signal = limits.signal ? AbortSignal.any([timeout, limits.signal]) : timeout;
   const response = await fetcher(request.url, { ...request.init, signal });
@@ -770,6 +777,8 @@ async function askProvider(
     if (config.gateway && kind === "plan") markGatewayPlanBlocked(config.model, Date.now(), attemptFrom(config, error));
     throw error;
   }
+  // The model has replied: what is left is reading its reply and matching the citations.
+  onReply?.();
   const { raw, model, finishReason } = readProviderResponse(config, await response.json());
   const parsed = parseAiAnswer(raw, context);
   if (!parsed.text) {
@@ -792,7 +801,18 @@ export async function runAiAnswer(
   query: string,
   context: AiContextItem[],
   preferred?: string,
-  options: { env?: Env; fetcher?: typeof fetch; answerLanguage?: string; totalMs?: number; hedgeMs?: number; minCallMs?: number; retryDelayMs?: number } = {},
+  options: {
+    history?: ChatMessage[];
+    env?: Env;
+    fetcher?: typeof fetch;
+    answerLanguage?: string;
+    totalMs?: number;
+    hedgeMs?: number;
+    minCallMs?: number;
+    retryDelayMs?: number;
+    /** Each real stage as it happens (asking a model, a retry, a failure, a fallback, writing), for the live progress line. */
+    onProgress?: (event: AiProgressEvent) => void;
+  } = {},
 ): Promise<AiAnswer> {
   const env = options.env ?? process.env;
   const fetcher = options.fetcher ?? fetch;
@@ -802,6 +822,15 @@ export async function runAiAnswer(
   const minCallMs = options.minCallMs ?? MIN_CALL_MS;
   const retryDelayMs = options.retryDelayMs ?? RETRY_DELAY_MS;
   const started = Date.now();
+  const emit = (event: AiProgressInput) => {
+    try {
+      options.onProgress?.({ ...event, at: Date.now() - started } as AiProgressEvent);
+    } catch {
+      // Progress is a nicety: a listener that throws never breaks the answer.
+    }
+  };
+  /** Models that failed so far: the next model asked is a fallback. */
+  let failures = 0;
   const modelId = aiModelOf(preferred);
   const pickedProvider = modelId ? AI_MODELS.find((model) => model.id === modelId)?.provider : undefined;
   const providerPref = pickedProvider && pickedProvider !== "gemini" ? pickedProvider : aiProviderOf(preferred);
@@ -838,6 +867,8 @@ export async function runAiAnswer(
   for (const id of order) push(readProviderConfig(id, env));
   const picked = pickedSpec ? { picked: pickedSpec.id } : {};
   if (!queue.length) return { status: "unconfigured", message: AI_MESSAGES.unconfigured, ...picked };
+  for (const attempt of before) emit({ type: "failed", model: attempt.model, provider: attempt.provider, kind: attempt.kind });
+  failures = before.length;
 
   const remaining = () => totalMs - (Date.now() - started);
   /** Try each model in turn until one answers; failures go into `log`. */
@@ -845,15 +876,21 @@ export async function runAiAnswer(
     for (const config of configs) {
       if (stop?.aborted) return null;
       const left = remaining();
+      const who = { model: config.model, provider: config.id };
       if (left < minCallMs) {
         log.push({ provider: config.id, model: config.model, kind: "timeout", detail: "not tried: out of time" });
+        emit({ type: "skipped", ...who });
         continue;
       }
+      emit({ type: "ask", ...who, fallback: failures > 0 });
       let retried = false;
       for (;;) {
         const timeoutMs = Math.min(timeoutFor(config), remaining());
         try {
-          const answer = await askProvider(config, query, context, fetcher, options.answerLanguage, { timeoutMs, signal: stop }, graph ?? undefined);
+          const answer = await askProvider(
+            config, query, context, fetcher, options.answerLanguage, { timeoutMs, signal: stop }, graph ?? undefined, options.history,
+            () => { if (!stop?.aborted) emit({ type: "write", ...who }); },
+          );
           return { ...answer, config };
         } catch (error) {
           if (stop?.aborted) return null;
@@ -862,6 +899,7 @@ export async function runAiAnswer(
           if (!retried && isRetryable(attempt) && remaining() >= minCallMs + retryDelayMs) {
             retried = true;
             console.error(`${attemptLogLine(attempt)} (retrying once)`);
+            emit({ type: "retry", ...who });
             await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
             if (stop?.aborted) return null;
             continue;
@@ -869,6 +907,8 @@ export async function runAiAnswer(
           if (retried) attempt.detail = sanitizeDetail(`${attempt.detail ? `${attempt.detail} ` : ""}(failed twice)`);
           console.error(attemptLogLine(attempt));
           log.push(attempt);
+          failures += 1;
+          emit({ type: "failed", ...who, kind: attempt.kind });
           break;
         }
       }
@@ -892,6 +932,7 @@ export async function runAiAnswer(
       winner = early ?? (await chain(rest, restLog));
     } else {
       // The pick is still thinking: start the fallback now, but prefer the pick if it answers in time.
+      emit({ type: "hedge", model: first.model, provider: first.id });
       const stopRest = new AbortController();
       const restRun = chain(rest, restLog, stopRest.signal);
       winner = await firstRun;
