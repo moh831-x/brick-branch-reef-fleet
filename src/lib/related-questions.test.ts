@@ -44,6 +44,16 @@ describe("related questions", () => {
     );
   });
 
+  it("drops a question already asked in the chat and offers the next one", () => {
+    const questions = relatedQuestions("Bernie Sanders", "en-US", [], [], ["What is Bernie Sanders known for?"]);
+    assert.equal(questions.includes("What is Bernie Sanders known for?"), false);
+    assert.deepEqual(questions, [
+      "What is the latest on Bernie Sanders?",
+      "What else matters about Bernie Sanders?",
+      "What do the sources disagree on about Bernie Sanders?",
+    ]);
+  });
+
   it("does not ask who a graph is", () => {
     assert.deepEqual(relatedQuestions("graph of x^2", "en-US"), []);
   });

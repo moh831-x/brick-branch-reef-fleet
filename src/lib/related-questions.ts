@@ -51,29 +51,34 @@ const PERSON_RESTS = new Set([
   "height",
 ]);
 
-/** Three questions about this search, in the page language. Empty for a graph, which already has its own suggestions. */
+/** Three questions about this search, in the page language. Empty for a graph, which already has its own suggestions. Questions already sent in the chat are skipped, and the next ones take their place. */
 export function relatedQuestions(
   query: string,
   lang: UiLang,
   dives: readonly string[] = [],
   places: readonly string[] = [],
+  history: readonly string[] = [],
 ): string[] {
   const raw = query.replace(/\s+/g, " ").trim();
   if (raw.length < 2 || parseGraphQuery(raw)) return [];
   const topic = labelTopic(raw);
   const kind = placeKind(raw, places);
-  const asked = /^(who|what|when|where|why|how|which|is|are|did|does|do|can|was|were)\b/i.test(raw) || raw.endsWith("?");
-  const fromDives = asked
+  const isQuestion = /^(who|what|when|where|why|how|which|is|are|did|does|do|can|was|were)\b/i.test(raw) || raw.endsWith("?");
+  const fromDives = isQuestion
     ? []
     : dives
         .map((dive) => questionFromDive(topic, raw, dive, kind !== null))
         .filter((item): item is string => Boolean(item));
-  const templates = asked ? moreAbout(topic, lang) : templatesFor(topic, lang, kind, raw);
+  const first = isQuestion ? [] : templatesFor(topic, lang, kind, raw);
+  // The opening question ("Who is…", "Where is…") is the search itself. Once the chat has started, do not offer it again.
+  const fresh = history.length ? first.slice(1) : first;
+  const pool = [...(history.length || isQuestion ? [] : fromDives), ...fresh, ...moreAbout(topic, lang)];
+  const used = new Set([raw, ...history].map((line) => line.replace(/\s+/g, " ").trim().toLowerCase()).filter(Boolean));
   const seen = new Set<string>();
   const out: string[] = [];
-  for (const item of [...fromDives, ...templates]) {
+  for (const item of pool) {
     const key = item.toLowerCase();
-    if (seen.has(key)) continue;
+    if (seen.has(key) || used.has(key)) continue;
     seen.add(key);
     out.push(item);
     if (out.length === 3) break;

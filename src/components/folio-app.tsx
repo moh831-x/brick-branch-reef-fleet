@@ -3220,6 +3220,7 @@ function RelatedQuestionList({
   query,
   dives,
   places,
+  history = [],
   lang,
   disabled,
   onPick,
@@ -3227,11 +3228,12 @@ function RelatedQuestionList({
   query: string;
   dives: readonly string[];
   places: readonly string[];
+  history?: readonly string[];
   lang: UiLang;
   disabled?: boolean;
   onPick: (prompt: string) => void;
 }) {
-  const specific = relatedQuestions(query, lang, dives, places);
+  const specific = relatedQuestions(query, lang, dives, places, history);
   const prompts = specific.length ? specific : followUpPrompts[lang];
   return (
     <div className="mt-5">
@@ -3374,7 +3376,7 @@ function ChatFollowUps({ query, dives = [], places = [], initial, context, model
     </div>
     <div ref={end} />
     {/* After a clarifying reply, its own suggestions replace the related questions. */}
-    {openQuestion ? null : <RelatedQuestionList query={query} dives={dives} places={places} lang={lang} disabled={pending} onPick={sendPrompt} />}
+    {openQuestion ? null : <RelatedQuestionList query={query} dives={dives} places={places} history={turns.map((turn) => turn.question)} lang={lang} disabled={pending} onPick={sendPrompt} />}
     <p className="mt-2 text-xs leading-relaxed text-muted">{labels.privacy}</p>
   </div>;
 }
