@@ -759,16 +759,6 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
           <p className="mt-4 max-w-xl text-center text-sm leading-relaxed text-muted">
             {copy.blurb}
           </p>
-          <button type="button" onClick={() => {
-            const next = { web: false, wiki: false, grok: false, images: false, ai: true };
-            setActiveId(null);
-            persistSources(next);
-            if (draft.trim()) go(draft, next);
-            else inputRef.current?.focus();
-          }} className="mt-4 inline-flex min-h-11 items-center gap-2 rounded-full border border-line bg-surface px-4 text-sm text-accent hover:bg-accent-soft">
-            <MessageSquare className="size-4" aria-hidden="true" />{chatCopy(uiLang).start}
-          </button>
-          <div className="w-full max-w-xl"><AnswerImage query={draft} lang={uiLang} /></div>
           {!anySource ? (
             <div className="mt-4 w-full max-w-xl">
               <p className="mb-2 text-sm text-accent">{questionCopy(uiLang).noSources}</p>
