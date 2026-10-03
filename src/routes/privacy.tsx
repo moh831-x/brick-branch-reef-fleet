@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
-import { createFileRoute, Link } from "@tanstack/react-router";
-import { SiteFooter } from "@/components/site-footer";
+import { createFileRoute } from "@tanstack/react-router";
+import { DocPage } from "@/components/doc-page-chrome";
 
 const TITLE = "Privacy policy";
 const DESCRIPTION =
@@ -25,16 +25,7 @@ function Out({ href, children }: { href: string; children: ReactNode }) {
 
 function PrivacyPage() {
   return (
-    <main className="mx-auto min-h-screen max-w-2xl px-4 pt-12">
-      <p className="mb-8">
-        <Link
-          to="/"
-          search={{ q: "", near: "" }}
-          className="font-display text-2xl tracking-tight text-ink"
-        >
-          Folio
-        </Link>
-      </p>
+    <DocPage>
       <h1 className="font-display text-4xl leading-tight tracking-tight text-ink">{TITLE}</h1>
       <p className="mt-2 text-sm text-muted">
         Effective September 29, 2026
@@ -49,17 +40,21 @@ function PrivacyPage() {
         <h2 className="pt-2 font-display text-2xl">In short</h2>
         <ul className="grid list-disc gap-2 pl-5">
           <li>There are no accounts. Folio never asks for your name or email address.</li>
-          <li>Folio’s code sets no cookies and includes no analytics or tracking scripts.</li>
+          <li>Folio does not use its own analytics. Google AdSense may use advertising cookies and tracking.</li>
           <li>
             When you search, your search text goes to Folio’s server. The server passes it to the
             sources you have on to get results. Folio does not save your searches in a database.
           </li>
           <li>
+            AI answers are off unless you turn them on. Only then does your search, with the top
+            results, go to the AI provider you picked (xAI, OpenAI, or Anthropic).
+          </li>
+          <li>
             Your source settings and recent searches are kept in your browser, not on our server.
           </li>
           <li>
-            Ads are off unless you turn them on. Even then, your search is never sent to the ad
-            network.
+            Google AdSense may display ads and receive browser details and the page URL, which
+            can include your search query on results pages.
           </li>
         </ul>
 
@@ -84,6 +79,15 @@ function PrivacyPage() {
             Grokipedia is on.
           </li>
           <li>
+            <span className="font-medium">One AI provider</span>, only when AI is on: xAI for Grok,
+            OpenAI for ChatGPT, or Anthropic for Claude, whichever you picked. It receives your search
+            plus the titles, snippets, and addresses of the top results from the sources that are on
+            (for Images, each picture’s title and the page it was found on), to write the AI answer.
+            The other two providers receive nothing. If the provider you picked does not answer, Folio
+            sends the same request to the next provider that is set up, and the answer says which one
+            wrote it. Each provider handles the request under its own API terms and privacy policy.
+          </li>
+          <li>
             <span className="font-medium">Datamuse</span>: short definitions for words in your
             search.
           </li>
@@ -106,19 +110,29 @@ function PrivacyPage() {
           <span className="font-mono">/?q=…</span>), so it appears in your browser history and in
           the address you share if you copy the link. The public search endpoint at{" "}
           <span className="font-mono">/api/search</span> works the same way. The query is in the
-          address, and results come from the same services.
+          address, and results come from the same services. The website asks an AI provider for a short answer on
+          every search. The public search endpoint sends the query to an AI provider only when the address asks for
+          an AI answer (<span className="font-mono">ai=1</span>). If the site language is not English, Folio asks an
+          AI provider to translate the query into that language (sent to that language’s Wikipedia) and into English
+          (sent to Grokipedia, and to Bing with the site language set when the query is not in Latin script). Grokipedia
+          titles and snippets, and the text of a preview you open, are also sent to an AI provider to be translated into
+          the site language. The AI answer is written in the site language. Until you pick a language, Folio reads your browser’s preferred languages (the
+          Accept-Language header it sends with every request) to choose one.
         </p>
 
         <h2 className="pt-2 font-display text-2xl">What stays in your browser</h2>
-        <p>Folio keeps three items in your browser’s local storage for this site:</p>
+        <p>Folio keeps five items in your browser’s local storage for this site:</p>
         <ul className="grid list-disc gap-2 pl-5">
           <li>which sources you turned on or off;</li>
+          <li>which AI model you picked, if you picked one;</li>
+          <li>which site language you picked, if you picked one;</li>
+          <li>which speaking voice you picked for that language, if you picked one;</li>
           <li>your last six searches, shown under Recent;</li>
-          <li>whether you turned sponsored listings on.</li>
         </ul>
         <p>
-          These stay on your device. Folio’s server does not receive them as stored data. It only
-          receives the search you are running. To remove them, use Clear next to Recent, or clear
+          These stay on your device. The site language is also stored in a cookie named{" "}
+          <span className="font-mono">folio_lang</span> so pages and searches load in that language. That cookie is sent to
+          Folio’s server. The other saved items are not. To remove them, use Clear next to Recent, or clear
           this site’s data in your browser settings.
         </p>
 
@@ -169,18 +183,22 @@ function PrivacyPage() {
           Related policies: <Out href="https://policies.google.com/privacy">Google</Out>,{" "}
           <Out href="https://www.microsoft.com/privacy/privacystatement">Microsoft</Out>,{" "}
           <Out href="https://foundation.wikimedia.org/wiki/Policy:Privacy_policy">Wikimedia</Out>,{" "}
-          <Out href="https://x.ai/legal/privacy-policy">xAI</Out>.
+          <Out href="https://x.ai/legal/privacy-policy">xAI</Out>,{" "}
+          <Out href="https://openai.com/policies/privacy-policy">OpenAI</Out>,{" "}
+          <Out href="https://www.anthropic.com/legal/privacy">Anthropic</Out>.
         </p>
 
         <h2 className="pt-2 font-display text-2xl">Ads</h2>
         <p>
-          Sponsored listings are off by default. If you turn on “Call the ad network” under Ad
-          preferences, Folio’s server asks the Kevel ad network for one ad and reports that it was
-          shown. That request has no search text and no information about you. If an ad appears, its
-          image loads from Kevel’s servers in your browser, and clicking it goes through Kevel’s
-          click link, so Kevel sees your IP address and browser details at that point. When ads
-          are enabled, Kevel may receive your IP address and browser details under its own privacy
-          policy (see <Out href="https://www.kevel.com/">Kevel</Out>). Turn the setting off to stop ads.
+          Folio uses Google AdSense to display advertisements. Google and other third-party
+          advertising vendors may use cookies to serve ads based on your previous visits to this
+          site or other websites. Google’s advertising cookies allow it and its partners to show
+          personalized ads. Ad requests may share your IP address, browser details, and page URL
+          with Google. You can manage personalized advertising through{" "}
+          <Out href="https://myadcenter.google.com/">Google My Ad Center</Out> or opt out of
+          participating third-party vendors through{" "}
+          <Out href="https://www.aboutads.info/choices/">AdChoices</Out>. Read more about{" "}
+          <Out href="https://policies.google.com/technologies/ads">Google’s advertising practices</Out>.
         </p>
 
         <h2 className="pt-2 font-display text-2xl">Links you open</h2>
@@ -215,8 +233,9 @@ function PrivacyPage() {
         <h2 className="pt-2 font-display text-2xl">Your choices</h2>
         <ul className="grid list-disc gap-2 pl-5">
           <li>Turn Wikipedia, Grokipedia, or Images off so a search skips them.</li>
+          <li>Leave AI off so your search is never sent to an AI provider.</li>
           <li>Clear Recent, or clear this site’s data in your browser.</li>
-          <li>Leave sponsored listings off.</li>
+          <li>Manage personalized ads through Google My Ad Center.</li>
           <li>
             Avoid typing personal details into the search box, since searches are sent to the
             services above.
@@ -230,12 +249,6 @@ function PrivacyPage() {
           <Out href="mailto:hossain6944@gmail.com">hossain6944@gmail.com</Out>.
         </p>
       </div>
-      <p className="mt-8">
-        <Link to="/" search={{ q: "", near: "" }} className="text-sm font-medium text-ink">
-          Back to search
-        </Link>
-      </p>
-      <SiteFooter />
-    </main>
+    </DocPage>
   );
 }
