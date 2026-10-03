@@ -43,6 +43,9 @@ import { questionCopy } from "@/lib/question-copy";
 import { AnswerCode } from "@/components/answer-code";
 import { AnswerImage } from "@/components/answer-image";
 import { WorkLive, WorkSummary } from "@/components/ai-work";
+import { NewsCards, SourceChip } from "@/components/news-answer";
+import { answerBlocks, groupCites, hasBullets, type AnswerBlock } from "@/lib/answer-blocks";
+import { pickNewsCards } from "@/lib/news.shared";
 import { askAiWithProgress } from "@/lib/ask-ai";
 import { addClientStep, addDoneStep, addServerEvent, createTrace, finishWithAnswer, markSent, type WorkTrace } from "@/lib/ai-progress";
 import { FAILURE_COPY } from "@/lib/work-label";
@@ -1386,6 +1389,7 @@ function AiAnswerCard({
       return;
     }
     const context = pickAiContext({
+      news: sources.web ? data.news : undefined,
       web: sources.web ? data.web : undefined,
       wiki: sources.wiki ? data.wiki : undefined,
       grok: sources.grok ? data.grok : undefined,
@@ -1438,6 +1442,8 @@ function AiAnswerCard({
   );
   const question = questionCopy(lang);
   const pending = !answer;
+  // A news search: articles from the news feed as cards under the answer, the ones it cited first.
+  const newsCards = answer?.status === "ok" && sources.web && data?.news?.results.length ? pickNewsCards(data.news.results, answer.citations) : [];
   // After a few seconds, say how long the pick may take (slow reasoning models wait up to 40 s).
   const [slow, setSlow] = useState(false);
   useEffect(() => {
@@ -1487,7 +1493,13 @@ function AiAnswerCard({
           <>
             {trace ? <WorkSummary trace={trace} lang={lang} copy={copy} /> : null}
             <div className="mt-3 min-w-0 text-base leading-relaxed text-ink">
-              <AiText parts={answer.parts} citations={answer.citations} copy={copy} lang={lang} />
+              <AiText
+                parts={answer.parts}
+                citations={answer.citations}
+                copy={copy}
+                lang={lang}
+                after={newsCards.length ? <NewsCards items={newsCards} lang={lang} /> : undefined}
+              />
             </div>
             <ReadAloud
               resetKey={key}
@@ -1541,7 +1553,7 @@ function AiAnswerCard({
         <button type="button" onClick={() => setAttempt(value => value + 1)} aria-label={copy.tryAgain} title={copy.tryAgain} className="mt-2 grid size-11 place-items-center rounded-full text-muted hover:bg-accent-soft hover:text-ink"><RotateCw className="size-4" aria-hidden="true" /></button>
       </div> : null}
       <AnswerImage key={normalized} query={query} answer={answer?.status === "ok" ? answer.text : undefined} lang={lang} />
-      {answer?.status === "ok" ? <ChatFollowUps key={key} query={query} initial={answer} context={pickAiContext({ web: sources.web ? data?.web : undefined, wiki: sources.wiki ? data?.wiki : undefined, grok: sources.grok ? data?.grok : undefined, images: sources.images ? data?.images : undefined })} model={selected} lang={lang} copy={copy} /> : null}
+      {answer?.status === "ok" ? <ChatFollowUps key={key} query={query} initial={answer} context={pickAiContext({ news: sources.web ? data?.news : undefined, web: sources.web ? data?.web : undefined, wiki: sources.wiki ? data?.wiki : undefined, grok: sources.grok ? data?.grok : undefined, images: sources.images ? data?.images : undefined })} model={selected} lang={lang} copy={copy} /> : null}
     </section>
   );
 }
@@ -1714,34 +1726,80 @@ function AiText({
   citations,
   copy,
   lang,
+  after,
 }: {
   parts: AiPart[];
   lang: UiLang;
   citations: Extract<AiAnswer, { status: "ok" }>["citations"];
   copy: UiCopy;
+  /** Shown after the answer, or before its closing line when it is a list (news cards). */
+  after?: ReactNode;
 }) {
+  // An answer built from sources shows each point's sources as a chip (icon and name) where it cites them.
+  const chips = citations.length > 0;
+  const inline = (list: readonly AiPart[]) =>
+    (chips ? groupCites(list) : list).map((part, index) => {
+      if ("cites" in part) {
+        const cites = part.cites.map((n) => citations[n - 1]).filter((cite): cite is (typeof citations)[number] => Boolean(cite));
+        return <SourceChip key={index} cites={cites} lang={lang} />;
+      }
+      if ("code" in part) return <AnswerCode key={index} code={part.code} language={part.language} lang={lang} />;
+      if ("text" in part) {
+        const pieces = part.text.split(/(`[^`\n]+`)/g).map((text, i) => text.startsWith("`") && text.endsWith("`") ? <code key={i} dir="ltr" className="rounded bg-line px-1 font-mono text-sm">{text.slice(1, -1)}</code> : text);
+        return part.strong ? <strong key={index} className="font-semibold whitespace-pre-wrap">{pieces}</strong> : <span key={index} className="whitespace-pre-wrap">{pieces}</span>;
+      }
+      const cite = citations[part.cite - 1];
+      if (!cite) return null;
+      return (
+        <sup key={index} className="ms-px">
+          <a
+            href={cite.url}
+            target="_blank"
+            rel="noreferrer"
+            {...selectSafeLink}
+            aria-label={fill(copy.sourceN, { n: String(cite.n), title: cite.title })}
+            className="inline-block rounded-full bg-accent-soft px-[0.4em] py-[0.15em] text-[0.7rem] leading-none font-medium text-accent tabular-nums hover:bg-accent hover:text-bg"
+          >
+            {cite.n}
+          </a>
+        </sup>
+      );
+    });
+  if (!hasBullets(parts)) {
+    return (
+      <>
+        {inline(parts)}
+        {after ? <div>{after}</div> : null}
+      </>
+    );
+  }
+  // A list (news answers): intro line, bullets, and a closing line. Cards go before the closing line.
+  const blocks = answerBlocks(parts);
+  const groups: Array<{ kind: "ul"; items: Array<Extract<AnswerBlock, { kind: "li" }>> } | AnswerBlock> = [];
+  for (const block of blocks) {
+    const prev = groups[groups.length - 1];
+    if (block.kind === "li" && prev?.kind === "ul") prev.items.push(block);
+    else if (block.kind === "li") groups.push({ kind: "ul", items: [block] });
+    else groups.push(block);
+  }
+  // A closing paragraph right after the list (the follow-up offer).
+  const closing = groups.length > 1 && groups[groups.length - 1]?.kind === "p" && groups[groups.length - 2]?.kind === "ul" ? groups.length - 1 : groups.length;
+  const rendered = groups.map((group, index) => {
+    if (group.kind === "ul") {
+      return (
+        <ul key={index} className="my-2 list-disc space-y-2 ps-5 marker:text-muted">
+          {group.items.map((item, i) => <li key={i} dir="auto" className="ps-0.5">{inline(item.parts)}</li>)}
+        </ul>
+      );
+    }
+    if (group.kind === "code") return <AnswerCode key={index} code={group.part.code} language={group.part.language} lang={lang} />;
+    return <p key={index} dir="auto" className="my-2 first:mt-0">{inline(group.parts)}</p>;
+  });
   return (
     <>
-      {parts.map((part, index) => {
-        if ("code" in part) return <AnswerCode key={index} code={part.code} language={part.language} lang={lang} />;
-        if ("text" in part) return <span key={index} className="whitespace-pre-wrap">{part.text.split(/(`[^`\n]+`)/g).map((text, i) => text.startsWith("`") && text.endsWith("`") ? <code key={i} dir="ltr" className="rounded bg-line px-1 font-mono text-sm">{text.slice(1, -1)}</code> : text)}</span>;
-        const cite = citations[part.cite - 1];
-        if (!cite) return null;
-        return (
-          <sup key={index} className="ms-px">
-            <a
-              href={cite.url}
-              target="_blank"
-              rel="noreferrer"
-              {...selectSafeLink}
-              aria-label={fill(copy.sourceN, { n: String(cite.n), title: cite.title })}
-              className="inline-block rounded-full bg-accent-soft px-[0.4em] py-[0.15em] text-[0.7rem] leading-none font-medium text-accent tabular-nums hover:bg-accent hover:text-bg"
-            >
-              {cite.n}
-            </a>
-          </sup>
-        );
-      })}
+      {rendered.slice(0, closing)}
+      {after ? <div>{after}</div> : null}
+      {rendered.slice(closing)}
     </>
   );
 }
