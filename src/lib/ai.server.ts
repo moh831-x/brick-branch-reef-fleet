@@ -1,4 +1,5 @@
 import { cleanChatHistory, type ChatMessage } from "./chat.shared.ts";
+import type { AiProgressEvent, AiProgressInput } from "./ai-progress.ts";
 /**
  * Server-only providers for the optional AI answer. Keys are read from the server environment
  * and never reach the browser.
@@ -762,6 +763,7 @@ async function askProvider(
   limits: { timeoutMs?: number; signal?: AbortSignal } = {},
   graph?: string,
   history: ChatMessage[] = [],
+  onReply?: () => void,
 ) {
   const request = buildProviderRequest(config, query, context, language, graph, history);
   const timeout = AbortSignal.timeout(limits.timeoutMs ?? timeoutFor(config));
@@ -775,6 +777,8 @@ async function askProvider(
     if (config.gateway && kind === "plan") markGatewayPlanBlocked(config.model, Date.now(), attemptFrom(config, error));
     throw error;
   }
+  // The model has replied: what is left is reading its reply and matching the citations.
+  onReply?.();
   const { raw, model, finishReason } = readProviderResponse(config, await response.json());
   const parsed = parseAiAnswer(raw, context);
   if (!parsed.text) {
@@ -797,7 +801,18 @@ export async function runAiAnswer(
   query: string,
   context: AiContextItem[],
   preferred?: string,
-  options: { history?: ChatMessage[]; env?: Env; fetcher?: typeof fetch; answerLanguage?: string; totalMs?: number; hedgeMs?: number; minCallMs?: number; retryDelayMs?: number } = {},
+  options: {
+    history?: ChatMessage[];
+    env?: Env;
+    fetcher?: typeof fetch;
+    answerLanguage?: string;
+    totalMs?: number;
+    hedgeMs?: number;
+    minCallMs?: number;
+    retryDelayMs?: number;
+    /** Each real stage as it happens (asking a model, a retry, a failure, a fallback, writing), for the live progress line. */
+    onProgress?: (event: AiProgressEvent) => void;
+  } = {},
 ): Promise<AiAnswer> {
   const env = options.env ?? process.env;
   const fetcher = options.fetcher ?? fetch;
@@ -807,6 +822,15 @@ export async function runAiAnswer(
   const minCallMs = options.minCallMs ?? MIN_CALL_MS;
   const retryDelayMs = options.retryDelayMs ?? RETRY_DELAY_MS;
   const started = Date.now();
+  const emit = (event: AiProgressInput) => {
+    try {
+      options.onProgress?.({ ...event, at: Date.now() - started } as AiProgressEvent);
+    } catch {
+      // Progress is a nicety: a listener that throws never breaks the answer.
+    }
+  };
+  /** Models that failed so far: the next model asked is a fallback. */
+  let failures = 0;
   const modelId = aiModelOf(preferred);
   const pickedProvider = modelId ? AI_MODELS.find((model) => model.id === modelId)?.provider : undefined;
   const providerPref = pickedProvider && pickedProvider !== "gemini" ? pickedProvider : aiProviderOf(preferred);
@@ -843,6 +867,8 @@ export async function runAiAnswer(
   for (const id of order) push(readProviderConfig(id, env));
   const picked = pickedSpec ? { picked: pickedSpec.id } : {};
   if (!queue.length) return { status: "unconfigured", message: AI_MESSAGES.unconfigured, ...picked };
+  for (const attempt of before) emit({ type: "failed", model: attempt.model, provider: attempt.provider, kind: attempt.kind });
+  failures = before.length;
 
   const remaining = () => totalMs - (Date.now() - started);
   /** Try each model in turn until one answers; failures go into `log`. */
@@ -850,15 +876,21 @@ export async function runAiAnswer(
     for (const config of configs) {
       if (stop?.aborted) return null;
       const left = remaining();
+      const who = { model: config.model, provider: config.id };
       if (left < minCallMs) {
         log.push({ provider: config.id, model: config.model, kind: "timeout", detail: "not tried: out of time" });
+        emit({ type: "skipped", ...who });
         continue;
       }
+      emit({ type: "ask", ...who, fallback: failures > 0 });
       let retried = false;
       for (;;) {
         const timeoutMs = Math.min(timeoutFor(config), remaining());
         try {
-          const answer = await askProvider(config, query, context, fetcher, options.answerLanguage, { timeoutMs, signal: stop }, graph ?? undefined, options.history);
+          const answer = await askProvider(
+            config, query, context, fetcher, options.answerLanguage, { timeoutMs, signal: stop }, graph ?? undefined, options.history,
+            () => { if (!stop?.aborted) emit({ type: "write", ...who }); },
+          );
           return { ...answer, config };
         } catch (error) {
           if (stop?.aborted) return null;
@@ -867,6 +899,7 @@ export async function runAiAnswer(
           if (!retried && isRetryable(attempt) && remaining() >= minCallMs + retryDelayMs) {
             retried = true;
             console.error(`${attemptLogLine(attempt)} (retrying once)`);
+            emit({ type: "retry", ...who });
             await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
             if (stop?.aborted) return null;
             continue;
@@ -874,6 +907,8 @@ export async function runAiAnswer(
           if (retried) attempt.detail = sanitizeDetail(`${attempt.detail ? `${attempt.detail} ` : ""}(failed twice)`);
           console.error(attemptLogLine(attempt));
           log.push(attempt);
+          failures += 1;
+          emit({ type: "failed", ...who, kind: attempt.kind });
           break;
         }
       }
@@ -897,6 +932,7 @@ export async function runAiAnswer(
       winner = early ?? (await chain(rest, restLog));
     } else {
       // The pick is still thinking: start the fallback now, but prefer the pick if it answers in time.
+      emit({ type: "hedge", model: first.model, provider: first.id });
       const stopRest = new AbortController();
       const restRun = chain(rest, restLog, stopRest.signal);
       winner = await firstRun;

@@ -11,10 +11,24 @@ const rows: Record<UiLang, readonly [string, string, string, string, string, str
   "pt-BR": ["Continue a conversa", "Faça outra pergunta…", "Enviar mensagem", "Novo chat", "Copiar resposta", "Copiado", "O chat permanece nesta página. As mensagens recentes são enviadas ao modelo de IA selecionado."],
   "de-DE": ["Gespräch fortsetzen", "Stelle eine Folgefrage…", "Nachricht senden", "Neuer Chat", "Antwort kopieren", "Kopiert", "Der Chat bleibt auf dieser Seite. Die letzten Nachrichten werden an das gewählte KI-Modell gesendet."],
 };
+/** The one search bar in follow-up mode: its chip, the way back to searching, and the hint under a conversation. */
+const barRows: Record<UiLang, readonly [string, string, string]> = {
+  "en-US": ["Follow-up", "New search", "Type in the search bar"],
+  "bn-BD": ["পরবর্তী প্রশ্ন", "নতুন অনুসন্ধান", "সার্চ বারে লিখুন"],
+  "hi-IN": ["अगला प्रश्न", "नई खोज", "खोज बार में लिखें"],
+  "ar-SA": ["سؤال متابعة", "بحث جديد", "اكتب في شريط البحث"],
+  "es-ES": ["Seguimiento", "Nueva búsqueda", "Escribe en la barra de búsqueda"],
+  "fr-FR": ["Suite", "Nouvelle recherche", "Écrivez dans la barre de recherche"],
+  "zh-CN": ["追问", "新搜索", "在搜索栏中输入"],
+  "ja-JP": ["続けて質問", "新しい検索", "検索バーに入力"],
+  "pt-BR": ["Continuação", "Nova pesquisa", "Digite na barra de pesquisa"],
+  "de-DE": ["Folgefrage", "Neue Suche", "In die Suchleiste tippen"],
+};
 export function chatCopy(lang: UiLang) {
   const [title, placeholder, send, newChat, copy, copied, privacy] = rows[lang];
   const start: Record<UiLang, string> = {
     "en-US": "Chat with AI", "bn-BD": "AI-এর সাথে চ্যাট করুন", "hi-IN": "AI से चैट करें", "ar-SA": "الدردشة مع الذكاء الاصطناعي", "es-ES": "Chatea con IA", "fr-FR": "Discuter avec l’IA", "zh-CN": "与 AI 对话", "ja-JP": "AIとチャット", "pt-BR": "Converse com IA", "de-DE": "Mit KI chatten",
   };
-  return { title, placeholder, send, newChat, copy, copied, privacy, start: start[lang] };
+  const [followUp, newSearch, inBar] = barRows[lang];
+  return { title, placeholder, send, newChat, copy, copied, privacy, start: start[lang], followUp, newSearch, inBar };
 }

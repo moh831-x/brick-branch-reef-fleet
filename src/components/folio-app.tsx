@@ -1,9 +1,8 @@
-import { Fragment, useCallback, useContext, useEffect, useId, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
+import { Fragment, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import { ArrowUp, ArrowUpRight, Check, Copy, MessageSquare, BookOpen, ChevronDown, ChevronLeft, ChevronRight, Clock, Compass, Globe, ImageIcon, Pause, Play, RotateCw, Search, Share, Sparkles, Square, TrendingUp, Volume2, X } from "lucide-react";
 import type { FolioSearch } from "@/routes/index";
 import {
-  answerWithAi,
   listAiProviders,
   previewHit,
   suggestQueries,
@@ -27,7 +26,6 @@ import {
   aiModelTimeoutMs,
   fallbackFailures,
   type AiAttempt,
-  type AiFailureKind,
   aiChoiceOf,
   aiProviderLabel,
   pickAiContext,
@@ -39,13 +37,17 @@ import {
 } from "@/lib/ai.shared";
 import { SiteFooter } from "@/components/site-footer";
 import { fill, sourceLabel, type UiCopy } from "@/lib/ui-copy";
-import { ChatInputContext, type ImageInputTarget } from "@/lib/chat-input-context";
-import { imageCopy } from "@/lib/image-copy";
 import { chatCopy } from "@/lib/chat-copy";
 import { CHAT_INPUT_MAX, type ChatMessage } from "@/lib/chat.shared";
 import { questionCopy } from "@/lib/question-copy";
 import { AnswerCode } from "@/components/answer-code";
 import { AnswerImage } from "@/components/answer-image";
+import { WorkLive, WorkSummary } from "@/components/ai-work";
+import { askAiWithProgress } from "@/lib/ask-ai";
+import { addClientStep, addDoneStep, addServerEvent, createTrace, finishWithAnswer, markSent, type WorkTrace } from "@/lib/ai-progress";
+import { FAILURE_COPY } from "@/lib/work-label";
+import { activeTarget, afterRelease, PromptBridgeContext, usePromptBridge, type PromptBridge, type PromptTarget } from "@/components/prompt-bridge";
+import { imageCopy } from "@/lib/image-copy";
 import { GraphCard } from "@/components/graph-card";
 import { langDir, langInfo, PREVIEW_TRANSLATE_CHARS, type UiLang } from "@/lib/i18n";
 import { clickAction, factsOf, trackPresses } from "@/lib/select-click";
@@ -181,34 +183,52 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
   const navigate = useNavigate({ from: "/" });
   const loading = useRouterState({ select: (state) => state.isLoading });
   const listId = useId();
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const query = search.q.trim();
   const onResults = query.length > 0;
 
   const [draft, setDraft] = useState(query);
-  const chatSend = useRef<((question: string) => void) | null>(null);
-  const [chatReady, setChatReady] = useState(false);
-  const [chatBusy, setChatBusy] = useState(false);
-  const [imageTarget, setImageTarget] = useState<ImageInputTarget | null>(null);
-  const imageInput = useRef<ImageInputTarget | null>(null);
-  const activateImage = useCallback((target: ImageInputTarget) => {
-    if (imageInput.current?.id !== target.id) { setDraft(target.initial); setOpen(false); inputRef.current?.focus(); }
-    imageInput.current = target;
-    setImageTarget(target);
-  }, []);
-  const closeImage = useCallback((id: string) => {
-    if (imageInput.current?.id !== id) return;
-    imageInput.current = null;
-    setImageTarget(null);
-    setDraft("");
-  }, []);
-  const registerChat = useCallback((send: ((question: string) => void) | null) => {
-    const starting = send && !chatSend.current;
-    chatSend.current = send;
-    setChatReady(Boolean(send));
-    if (starting && !imageInput.current) { setDraft(""); setOpen(false); }
-    if (!send) setChatBusy(false);
-  }, []);
+  // All prompts share this one bar: follow-ups to the AI answer and image descriptions are sent
+  // from here to whichever feature is active (see prompt-bridge.ts).
+  const [targets, setTargets] = useState<Record<string, PromptTarget>>({});
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  const queryRef = useRef(query);
+  queryRef.current = query;
+  const targetsRef = useRef(targets);
+  targetsRef.current = targets;
+  const bridge = useMemo<PromptBridge>(() => ({
+    register: (id, target) => {
+      const isNew = !targetsRef.current[id];
+      setTargets((current) => ({ ...current, [id]: target }));
+      if (isNew && target.kind === "chat") {
+        // A new answer: follow up on it, unless the reader already started typing a new search.
+        const typed = draftRef.current.trim();
+        if (!typed || typed === queryRef.current) {
+          setActiveId(id);
+          setDraft("");
+        }
+      }
+    },
+    unregister: (id) => {
+      setTargets((current) => {
+        if (!(id in current)) return current;
+        const next = { ...current };
+        delete next[id];
+        return next;
+      });
+      setActiveId((current) => (current === id ? afterRelease(targetsRef.current, id) : current));
+    },
+    activate: (id) => {
+      setActiveId(id);
+      setOpen(false);
+      inputRef.current?.focus();
+    },
+    release: (id) => setActiveId((current) => (current === id ? afterRelease(targetsRef.current, id) : current)),
+  }), []);
+  const barTarget = onResults ? activeTarget(targets, activeId) : null;
+  const following = Boolean(barTarget);
   const [sources, setSources] = useState<Sources>(() => sourcesFrom(search));
   /** The reader's model pick: the address wins, then this browser's saved choice. */
   const [aiModel, setAiModel] = useState<string | undefined>(search.ai_model);
@@ -221,6 +241,8 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
   const [chrome, setChrome] = useState<"full" | "hidden" | "search">("full");
   // The language is picked on the home screen only; every other page follows that choice.
   const { lang: uiLang, copy } = useLang();
+  const chatWords = chatCopy(uiLang);
+  const imageWords = imageCopy(uiLang);
   useEffect(() => {
     // Lets result links tell a plain click from the end of a drag-selection.
     trackPresses();
@@ -259,14 +281,14 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
 
   useEffect(() => {
     const q = draft.trim();
-    if (chatReady || imageTarget || !open || q.length < 2) return;
+    if (!open || following || q.length < 2) return;
     const handle = window.setTimeout(() => {
       suggestQueries({ data: { q, lang: uiLang } })
         .then((rows) => setSuggestions(rows))
         .catch(() => setSuggestions([]));
     }, 180);
     return () => window.clearTimeout(handle);
-  }, [draft, open, uiLang, chatReady, imageTarget]);
+  }, [draft, open, following, uiLang]);
 
   useEffect(() => {
     let cancelled = false;
@@ -413,24 +435,44 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
 
   function onSubmit(event: FormEvent) {
     event.preventDefault();
-    if (imageInput.current) {
-      const target = imageInput.current;
-      if (target.available && !target.busy && draft.trim()) target.send(draft.trim());
-      return;
-    }
-    if (chatReady && chatSend.current) {
-      const question = draft.trim();
-      if (!question || chatBusy) return;
-      chatSend.current(question);
-      setDraft("");
-      setOpen(false);
+    if (barTarget) {
+      // A follow-up to the AI answer, or an image description.
+      if (barTarget.target.pending || !draft.trim()) return;
+      if (barTarget.target.submit(draft.trim().slice(0, barTarget.target.maxLength))) {
+        tap("medium");
+        setDraft("");
+        setOpen(false);
+      }
       return;
     }
     if (active >= 0 && menu[active]) go(menu[active]);
     else go(draft);
   }
 
-  function onKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+  /** Leave follow-up mode: the bar searches again. */
+  function newSearch() {
+    tap("select");
+    setActiveId(null);
+    setOpen(true);
+    inputRef.current?.focus();
+  }
+
+  // The bar grows with a multi-line follow-up (Shift+Enter), up to a few lines.
+  useLayoutEffect(() => {
+    const box = inputRef.current;
+    if (!box) return;
+    box.style.height = "auto";
+    box.style.height = `${Math.min(box.scrollHeight, 160)}px`;
+  }, [draft, following]);
+
+  function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key === "Enter" && !event.nativeEvent.isComposing) {
+      // Enter sends; Shift+Enter starts a new line in a follow-up (a search is one line).
+      if (event.shiftKey && following) return;
+      event.preventDefault();
+      event.currentTarget.form?.requestSubmit();
+      return;
+    }
     if (event.key === "Escape") {
       setOpen(false);
       setActive(-1);
@@ -467,7 +509,9 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
     });
   }
 
-  const showMenu = !imageTarget && !chatReady && open && menu.length > 0;
+  const showMenu = open && !following && menu.length > 0;
+  const barPlaceholder = barTarget?.target.kind === "image" ? imageWords.prompt : following ? chatWords.placeholder : copy.search;
+  const barChip = barTarget?.target.kind === "image" ? imageWords.chip : chatWords.followUp;
 
   function goHome() {
     setDraft("");
@@ -478,21 +522,37 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
   const searchForm = (
     <form onSubmit={onSubmit} className="relative" role="search">
       <label htmlFor="folio-q" className="sr-only">
-        {imageTarget?.placeholder ?? (chatReady ? chatCopy(uiLang).placeholder : copy.search)}
+        {barPlaceholder}
       </label>
       <div
         className="flex min-h-14 items-center gap-2 rounded-2xl border border-line bg-surface px-3 focus-within:border-accent"
         onMouseDown={(event) => {
           const target = event.target as HTMLElement;
-          if (target.closest("button, input")) return;
+          if (target.closest("button, input, textarea")) return;
           event.preventDefault();
           inputRef.current?.focus();
         }}
       >
-        {imageTarget ? <ImageIcon className="size-5 shrink-0 text-accent" aria-hidden="true" /> : <Search className="size-5 shrink-0 text-muted" aria-hidden="true" />}
-        <input
+        {barTarget ? (
+          // Follow-up or image mode: this chip says so, and tapping it goes back to searching.
+          <button
+            type="button"
+            onClick={newSearch}
+            aria-label={`${barChip}: ${chatWords.newSearch}`}
+            title={chatWords.newSearch}
+            className="inline-flex h-9 shrink-0 items-center gap-1 rounded-full bg-accent-soft px-2.5 text-xs text-accent transition-transform duration-150 ease-out active:scale-[0.96]"
+          >
+            {barTarget.target.kind === "image" ? <ImageIcon className="size-3.5 shrink-0" aria-hidden="true" /> : <MessageSquare className="size-3.5 shrink-0" aria-hidden="true" />}
+            <span className="hidden sm:inline">{barChip}</span>
+            <X className="size-3.5 shrink-0" aria-hidden="true" />
+          </button>
+        ) : (
+          <Search className="size-5 shrink-0 text-muted" aria-hidden="true" />
+        )}
+        <textarea
           ref={inputRef}
           id="folio-q"
+          rows={1}
           value={draft}
           onChange={(event) => {
             setDraft(event.target.value);
@@ -502,16 +562,16 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
           onFocus={() => setOpen(true)}
           onBlur={() => window.setTimeout(() => setOpen(false), 140)}
           onKeyDown={onKeyDown}
-          maxLength={imageTarget ? 1000 : chatReady ? CHAT_INPUT_MAX : 180}
-          placeholder={imageTarget?.placeholder ?? (chatReady ? chatCopy(uiLang).placeholder : copy.search)}
+          placeholder={barPlaceholder}
+          maxLength={barTarget?.target.maxLength}
           dir="auto"
           autoComplete="off"
-          enterKeyHint="search"
+          enterKeyHint={following ? "send" : "search"}
           role="combobox"
           aria-expanded={showMenu}
           aria-controls={listId}
           aria-autocomplete="list"
-          className="h-12 min-w-0 flex-1 bg-transparent text-base text-ink outline-none placeholder:text-muted"
+          className="block max-h-40 min-h-12 min-w-0 flex-1 resize-none bg-transparent py-3 text-base leading-6 text-ink outline-none placeholder:text-muted"
         />
         {draft ? (
           <button
@@ -539,8 +599,8 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
         />
         <button
           type="submit"
-          disabled={!draft.trim() || (imageTarget ? imageTarget.busy || !imageTarget.available : chatBusy)}
-          aria-label={imageTarget ? imageCopy(uiLang).create : chatReady ? chatCopy(uiLang).send : copy.search}
+          disabled={!draft.trim() || Boolean(barTarget?.target.pending)}
+          aria-label={barTarget?.target.kind === "image" ? imageWords.create : following ? chatWords.send : copy.search}
           className="inline-flex size-11 shrink-0 items-center justify-center rounded-full bg-ink text-bg transition-transform duration-150 ease-out active:scale-[0.96] disabled:opacity-40"
         >
           <ArrowUp className="size-4" />
@@ -653,7 +713,7 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
   );
 
   const sourcePills = (
-    <div className={onResults && (chatReady || imageTarget) ? "flex gap-2 overflow-x-auto pb-1" : "flex flex-wrap gap-2"}>
+    <div className={following ? "flex gap-2 overflow-x-auto pb-1" : "flex flex-wrap gap-2"}>
       {(Object.keys(SOURCE_META) as PillId[]).map((key) => (
         <SourcePill key={key} id={key} on={sources[key]} copy={copy} onToggle={() => toggle(key)} />
       ))}
@@ -661,7 +721,7 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
   );
 
   return (
-    <ChatInputContext.Provider value={{ register: registerChat, setBusy: setChatBusy, activateImage, closeImage, activeImageId: imageTarget?.id ?? null }}>
+    <PromptBridgeContext.Provider value={bridge}>
     <div className="min-h-screen">
       <div className="fixed inset-x-0 top-0 z-30 h-0.5" aria-hidden="true">
         {loading ? <div className="folio-bar h-full w-1/3 bg-accent" /> : null}
@@ -669,7 +729,7 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
       {onResults ? (
         <header
           className={`fixed inset-x-0 top-0 z-20 border-b border-line bg-bg transition-transform duration-200 ease-out ${
-            !chatReady && !imageTarget && chrome === "hidden" && !open ? "-translate-y-full" : "translate-y-0"
+            !following && chrome === "hidden" && !open ? "-translate-y-full" : "translate-y-0"
           }`}
         >
           <div className="mx-auto flex max-w-6xl flex-col px-4 py-3 sm:px-6">
@@ -677,13 +737,13 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
               type="button"
               onClick={goHome}
               className={`w-fit font-display text-2xl tracking-tight text-ink transition-transform duration-150 ease-out active:scale-[0.96] ${
-                !chatReady && !imageTarget && chrome === "search" && !open ? "hidden" : ""
+                !following && chrome === "search" && !open ? "hidden" : ""
               }`}
             >
               Folio
             </button>
-            <div className={!chatReady && !imageTarget && chrome === "search" && !open ? "" : "pt-4"}>{searchForm}</div>
-            <div className={!chatReady && !imageTarget && chrome === "search" && !open ? "hidden" : "pt-4"}>{sourcePills}</div>
+            <div className={!following && chrome === "search" && !open ? "" : "pt-4"}>{searchForm}</div>
+            <div className={!following && chrome === "search" && !open ? "hidden" : "pt-4"}>{sourcePills}</div>
           </div>
         </header>
       ) : (
@@ -760,7 +820,7 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
       ) : null}
       <SiteFooter copy={copy} />
     </div>
-    </ChatInputContext.Provider>
+    </PromptBridgeContext.Provider>
   );
 }
 
@@ -1245,7 +1305,7 @@ function Results({
 }
 
 
-type AiState = { key: string; answer: AiAnswer | null };
+type AiState = { key: string; answer: AiAnswer | null; trace: WorkTrace | null };
 
 /** One request per page load for which AI models can run on the server. */
 let providersRequest: Promise<AiModelStatus[]> | null = null;
@@ -1312,6 +1372,20 @@ function AiAnswerCard({
   // search re-run for the new language (data.pageLang) asks again with the new results.
   const key = JSON.stringify([normalized, sources.web, sources.wiki, sources.grok, sources.images, selected ?? "", lang, data?.pageLang ?? ""]);
   const ready = providers !== null && Boolean(data) && !loading && data?.query === normalized;
+  const searched = (["web", "wiki", "grok", "images"] as const).filter((id) => sources[id]);
+  // The search stage, for the progress line: seen live here, or (when the results came with the page)
+  // the server's own measured search time.
+  const searchKey = JSON.stringify([normalized, ...searched, lang]);
+  const searching = !data || loading || data.query !== normalized;
+  const [searchSeen, setSearchSeen] = useState<{ key: string; start: number; id: number } | null>(null);
+  const usedSearch = useRef(new Set<number>());
+  const askedSearch = useRef(new Set<string>());
+  useEffect(() => {
+    if (searching && searched.length && searchSeen?.key !== searchKey) {
+      setSearchSeen({ key: searchKey, start: performance.now(), id: (searchSeen?.id ?? 0) + 1 });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- start the clock once per search
+  }, [searching, searchKey]);
 
   useEffect(() => {
     if (!ready || !data) return;
@@ -1319,7 +1393,7 @@ function AiAnswerCard({
     if (asked.current === ask) return;
     asked.current = ask;
     if (Array.isArray(providers) && available.length === 0) {
-      setState({ key, answer: { status: "unconfigured", message: AI_MESSAGES.unconfigured } });
+      setState({ key, answer: { status: "unconfigured", message: AI_MESSAGES.unconfigured }, trace: null });
       return;
     }
     const context = pickAiContext({
@@ -1328,18 +1402,47 @@ function AiAnswerCard({
       grok: sources.grok ? data.grok : undefined,
       images: sources.images ? data.images : undefined,
     });
-    setState({ key, answer: null });
-    answerWithAi({ data: { q: data.query, context, model: selected, lang } })
-      .then((answer) => setState((current) => (current?.key === key ? { key, answer } : current)))
-      .catch(() =>
-        setState((current) =>
-          current?.key === key ? { key, answer: { status: "error", message: AI_MESSAGES.error } } : current,
-        ),
+    const now = performance.now();
+    let trace = createTrace(now);
+    if (searched.length) {
+      if (searchSeen && searchSeen.key === searchKey && !usedSearch.current.has(searchSeen.id)) {
+        usedSearch.current.add(searchSeen.id);
+        trace = addDoneStep(trace, { kind: "search", sources: [...searched] }, searchSeen.start, now);
+      } else if (!askedSearch.current.has(searchKey) && data.tookMs > 0) {
+        trace = addDoneStep(trace, { kind: "search", sources: [...searched] }, now - data.tookMs, now);
+      }
+    }
+    askedSearch.current.add(searchKey);
+    if (context.length) trace = addClientStep(trace, { kind: "read", count: context.length }, now);
+    trace = markSent(trace, now);
+    setState({ key, answer: null, trace });
+    const update = (change: (trace: WorkTrace) => WorkTrace) =>
+      setState((current) => (current?.key === key && current.trace && !current.answer ? { ...current, trace: change(current.trace) } : current));
+    const finish = (answer: AiAnswer) =>
+      setState((current) =>
+        current?.key === key ? { key, answer, trace: current.trace ? finishWithAnswer(current.trace, answer, performance.now()) : null } : current,
       );
+    const spec = AI_MODELS.find((model) => model.id === selected);
+    askAiWithProgress(
+      { q: data.query, context, model: selected, lang },
+      {
+        onEvent: (event) => update((current) => addServerEvent(current, event, performance.now())),
+        onFallback: () => update((current) => addClientStep(current, { kind: "ask", ...(spec ? { model: spec.id, provider: spec.provider } : {}) }, performance.now())),
+      },
+    )
+      .then(finish)
+      .catch(() => finish({ status: "error", message: AI_MESSAGES.error }));
     // eslint-disable-next-line react-hooks/exhaustive-deps -- ask once per query, source set, and provider, not per page
   }, [key, ready, attempt]);
 
   const answer = state?.key === key ? state.answer : null;
+  const trace = state?.key === key ? state.trace : null;
+  // Before the request leaves, the live line follows the search itself.
+  const liveTrace =
+    trace ??
+    (searchSeen && searchSeen.key === searchKey && searching
+      ? addClientStep(createTrace(searchSeen.start), { kind: "search", sources: [...searched] }, searchSeen.start)
+      : null);
   const hasReferences = Boolean(
     (sources.web && data?.web.results.length) || (sources.wiki && data?.wiki.results.length) ||
     (sources.grok && data?.grok.results.length) || (sources.images && data?.images.results.length),
@@ -1374,9 +1477,12 @@ function AiAnswerCard({
       <div aria-live="polite">
         {pending ? (
           <div className="mt-3">
-            <p className="text-sm text-muted">
-              {selected ? fill(hasReferences ? copy.asking : question.asking, { model: modelLabel(selected) }) : (hasReferences ? copy.writing : question.writing)}
-            </p>
+            <WorkLive
+              trace={liveTrace}
+              lang={lang}
+              copy={copy}
+              fallback={selected ? fill(hasReferences ? copy.asking : question.asking, { model: modelLabel(selected) }) : (hasReferences ? copy.writing : question.writing)}
+            />
             {slow && selected ? (
               <p className="mt-1 text-xs text-muted">
                 {fill(copy.aiSlow, { model: modelLabel(selected), seconds: String(Math.round(aiModelTimeoutMs(selected) / 1000)) })}
@@ -1390,6 +1496,7 @@ function AiAnswerCard({
           </div>
         ) : answer.status === "ok" ? (
           <>
+            {trace ? <WorkSummary trace={trace} lang={lang} copy={copy} /> : null}
             <div className="mt-3 min-w-0 text-base leading-relaxed text-ink">
               <AiText parts={answer.parts} citations={answer.citations} copy={copy} lang={lang} />
             </div>
@@ -1437,6 +1544,7 @@ function AiAnswerCard({
           </>
         ) : (
           <>
+          {trace ? <WorkSummary trace={trace} lang={lang} copy={copy} /> : null}
           <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
             <p className="text-sm text-muted">
               {answer.status === "unconfigured" ? copy.aiUnconfigured : answer.status === "no-context" ? copy.aiNoContext : copy.aiError}
@@ -1463,19 +1571,6 @@ function AiAnswerCard({
   );
 }
 
-const FAILURE_COPY: Record<AiFailureKind, keyof UiCopy> = {
-  plan: "failPlan",
-  auth: "failAuth",
-  "bad-request": "failBadRequest",
-  "not-found": "failNotFound",
-  "rate-limit": "failRateLimit",
-  timeout: "failTimeout",
-  server: "failServer",
-  empty: "failEmpty",
-  network: "failNetwork",
-  unavailable: "failUnavailable",
-  other: "failOther",
-};
 
 /** "Why?" under a fallback answer: each model that was tried first, and what its provider said. */
 function AiAttemptDetails({ attempts, copy }: { attempts: AiAttempt[]; copy: UiCopy }) {
@@ -2867,7 +2962,13 @@ const copyFailure: Record<UiLang, string> = {
   "en-US": "Could not copy. Select the answer to copy it.", "bn-BD": "কপি করা যায়নি। উত্তর নির্বাচন করে কপি করুন।", "hi-IN": "कॉपी नहीं हुआ। उत्तर चुनकर कॉपी करें।", "ar-SA": "تعذر النسخ. حدد الإجابة لنسخها.", "es-ES": "No se pudo copiar. Selecciona la respuesta para copiarla.", "fr-FR": "Copie impossible. Sélectionnez la réponse pour la copier.", "zh-CN": "无法复制，请选中回答复制。", "ja-JP": "コピーできません。回答を選択してコピーしてください。", "pt-BR": "Não foi possível copiar. Selecione a resposta para copiá-la.", "de-DE": "Kopieren fehlgeschlagen. Wähle die Antwort zum Kopieren aus.",
 };
 
-type ChatTurn = { question: string; answer: AiAnswer | null };
+type ChatTurn = { question: string; answer: AiAnswer | null; trace: WorkTrace | null };
+
+/**
+ * Follow-ups to the AI answer. There is no second text box: the search bar at the top sends the
+ * follow-ups while an answer is showing (see FollowUpBridge). This shows the conversation and tells
+ * the search bar how to send.
+ */
 function ChatFollowUps({ query, initial, context, model, lang, copy }: {
   query: string; initial: Extract<AiAnswer, { status: "ok" }>;
   context: AiContextItem[];
@@ -2877,9 +2978,12 @@ function ChatFollowUps({ query, initial, context, model, lang, copy }: {
   const inFlight = useRef(false);
   const alive = useRef(true);
   const end = useRef<HTMLDivElement>(null);
-  const inputBridge = useContext(ChatInputContext);
+  const latest = useRef<ChatTurn[]>(turns);
+  latest.current = turns;
+  const bridge = usePromptBridge();
+  const chatId = useId();
   const labels = chatCopy(lang);
-  useEffect(() => { alive.current = true; return () => { alive.current = false; inputBridge?.register(null); }; }, []);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   const pending = turns.some(turn => turn.answer === null);
   useEffect(() => { if (turns.length) end.current?.scrollIntoView({ behavior: "auto", block: "nearest" }); }, [turns]);
   async function ask(question: string, previous: ChatTurn[]) {
@@ -2887,39 +2991,70 @@ function ChatFollowUps({ query, initial, context, model, lang, copy }: {
     inFlight.current = true;
     const history: ChatMessage[] = [{ role: "user", content: query }, { role: "assistant", content: initial.text }];
     for (const turn of previous) if (turn.answer?.status === "ok") history.push({ role: "user", content: turn.question }, { role: "assistant", content: turn.answer.text });
-    setTurns([...previous, { question, answer: null }]);
+    const index = previous.length;
+    const now = performance.now();
+    const trace = markSent(addClientStep(createTrace(now), { kind: "read", chat: true }, now), now);
+    setTurns([...previous, { question, answer: null, trace }]);
+    const update = (change: (trace: WorkTrace) => WorkTrace) => {
+      if (!alive.current) return;
+      setTurns(current => current.map((turn, i) => (i === index && turn.answer === null && turn.trace ? { ...turn, trace: change(turn.trace) } : turn)));
+    };
+    const finish = (answer: AiAnswer) => {
+      if (!alive.current) return;
+      setTurns(current => [...current.slice(0, index), { question, answer, trace: finishWithAnswer(current[index]?.trace ?? trace, answer, performance.now()) }]);
+    };
+    const spec = AI_MODELS.find(item => item.id === model);
     try {
-      const answer = await answerWithAi({ data: { q: question, history, context, model, lang } });
-      if (alive.current) setTurns([...previous, { question, answer }]);
+      finish(await askAiWithProgress({ q: question, history, context, model, lang }, {
+        onEvent: event => update(current => addServerEvent(current, event, performance.now())),
+        onFallback: () => update(current => addClientStep(current, { kind: "ask", ...(spec ? { model: spec.id, provider: spec.provider } : {}) }, performance.now())),
+      }));
     } catch {
-      if (alive.current) setTurns([...previous, { question, answer: { status: "error", message: AI_MESSAGES.error } }]);
+      finish({ status: "error", message: AI_MESSAGES.error });
     } finally { inFlight.current = false; }
   }
+  const askRef = useRef(ask);
+  askRef.current = ask;
+  // Let the search bar send follow-ups while this conversation is on the page.
   useEffect(() => {
-    inputBridge?.register(question => {
-      if (!pending && !inFlight.current) void ask(question, turns);
+    bridge?.register(chatId, {
+      kind: "chat",
+      pending,
+      maxLength: CHAT_INPUT_MAX,
+      submit: (question: string) => {
+        const text = question.trim().slice(0, CHAT_INPUT_MAX);
+        if (!text || inFlight.current) return false;
+        void askRef.current(text, latest.current);
+        return true;
+      },
     });
-    inputBridge?.setBusy(pending);
-    // The bridge callbacks are stable; latest turns are registered after each answer.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [turns, pending]);
+  }, [bridge, chatId, pending]);
+  useEffect(() => () => bridge?.unregister(chatId), [bridge, chatId]);
   return <div className="mt-4 border-t border-line pt-4">
     <div className="mb-4 flex items-center justify-between gap-3"><h3 className="inline-flex items-center gap-2 text-sm font-medium"><MessageSquare className="size-4 text-accent" aria-hidden="true" />{labels.title}</h3>
       <Link to="/" search={{ q: "", near: "" }} className="inline-flex min-h-11 items-center rounded-full px-3 text-xs text-muted hover:text-accent">{labels.newChat}</Link>
     </div>
     <div className="grid min-w-0 gap-5" aria-live="polite" aria-busy={pending}>
       {turns.map((turn, index) => <div key={index} className="min-w-0">
-        <div className="mb-4 ms-auto w-fit max-w-full whitespace-pre-wrap break-words rounded-2xl bg-accent-soft px-4 py-3 text-sm text-ink">{turn.question}</div>
-        {turn.answer === null ? <p className="text-sm text-muted">{questionCopy(lang).writing}</p> : turn.answer.status === "ok" ? <>
-          <div className="min-w-0 text-base leading-relaxed"><AiText parts={turn.answer.parts} citations={turn.answer.citations} copy={copy} lang={lang} /></div>
+        <div dir="auto" className="mb-4 ms-auto w-fit max-w-full whitespace-pre-wrap break-words rounded-2xl bg-accent-soft px-4 py-3 text-sm text-ink">{turn.question}</div>
+        {turn.answer === null ? <WorkLive trace={turn.trace} lang={lang} copy={copy} fallback={questionCopy(lang).writing} /> : turn.answer.status === "ok" ? <>
+          {turn.trace ? <WorkSummary trace={turn.trace} lang={lang} copy={copy} /> : null}
+          <div className="mt-2 min-w-0 text-base leading-relaxed"><AiText parts={turn.answer.parts} citations={turn.answer.citations} copy={copy} lang={lang} /></div>
           <ReadAloud resetKey={`${index}:${turn.question}`} lang={lang} ready copy={copy} label={copy.listenAnswer} text={turn.answer.parts.map(part => "text" in part ? part.text : " ").join("")} />
           <AnswerCopy text={turn.answer.text} lang={lang} />
           <AnswerImage query={turn.question} answer={turn.answer.text} lang={lang} />
           <p className="mt-2 text-xs text-muted">{fill(context.length ? copy.writtenBy : questionCopy(lang).writtenBy, { provider: aiProviderLabel(turn.answer.provider), model: turn.answer.model })}</p>
-        </> : <div className="flex flex-wrap items-center gap-3"><p role="status" className="text-sm text-muted">{turn.answer.status === "unconfigured" ? copy.aiUnconfigured : copy.aiError}</p><button type="button" disabled={pending} onClick={() => void ask(turn.question, turns.slice(0, index))} className="min-h-11 rounded-full border border-line px-4 text-sm">{copy.tryAgain}</button></div>}
+        </> : <>
+          {turn.trace ? <WorkSummary trace={turn.trace} lang={lang} copy={copy} /> : null}
+          <div className="mt-2 flex flex-wrap items-center gap-3"><p role="status" className="text-sm text-muted">{turn.answer.status === "unconfigured" ? copy.aiUnconfigured : copy.aiError}</p><button type="button" disabled={pending} onClick={() => void ask(turn.question, turns.slice(0, index))} className="min-h-11 rounded-full border border-line px-4 text-sm">{copy.tryAgain}</button></div>
+        </>}
       </div>)}
     </div>
     <div ref={end} />
+    {/* No second text box: this sends the reader to the one search bar, in follow-up mode. */}
+    <button type="button" onClick={() => bridge?.activate(chatId)} disabled={!bridge} className="mt-5 flex min-h-11 w-full items-center gap-2 rounded-2xl border border-line bg-bg px-4 text-start text-sm text-muted hover:border-accent hover:text-ink">
+      <ArrowUp className="size-4 shrink-0 text-accent" aria-hidden="true" /><span className="min-w-0 flex-1">{labels.placeholder}</span><span className="hidden shrink-0 text-xs sm:inline">{labels.inBar}</span>
+    </button>
     <p className="mt-2 text-xs leading-relaxed text-muted">{labels.privacy}</p>
   </div>;
 }

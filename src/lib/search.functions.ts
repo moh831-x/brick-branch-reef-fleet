@@ -1,7 +1,7 @@
-import { CHAT_INPUT_MAX, cleanChatHistory } from "./chat.shared";
+import { readAnswerRequest } from "./ai-request";
 import { createServerFn } from "@tanstack/react-start";
 import { GROK_PAGE, IMAGES_PAGE, MAX_PAGE, PAGE, WEB_PAGE } from "./search.shared";
-import { AI_MAX_CONTEXT, aiChoiceOf, cleanContextItem, type AiAnswer, type AiContextItem, type AiModelStatus } from "./ai.shared";
+import { type AiAnswer, type AiModelStatus } from "./ai.shared";
 import { aiModelStatus, runAiAnswer, runTranslate } from "./ai.server";
 import { LANG_COOKIE, languageName, matchLang, pickLang, parseAcceptLanguage, PREVIEW_TRANSLATE_CHARS, type UiLang } from "./i18n";
 import { SEARCH_LANGS, asSearchLang, runPreview, runSearch, runSuggest, runTrending, type HitPreview, type SearchInput, type SearchPayload, type SourceId, type Suggestion, type Trend } from "./search.server";
@@ -64,24 +64,11 @@ export const searchAll = createServerFn({ method: "POST" })
  * other sources have loaded, and passes the top results it already has as context (from every
  * source that is on), so the search is not fetched twice and the other sources never wait on
  * the model. `provider` is the reader's pick; the server falls back to the next set-up provider.
+ * The page normally asks through the streamed route (/api/ai-answer) to show live progress; this
+ * plain call is its fallback when that route cannot be reached.
  */
 export const answerWithAi = createServerFn({ method: "POST" })
-  .validator((input: unknown) => {
-    if (typeof input !== "object" || input === null) throw new Error("Invalid answer request");
-    const raw = input as Record<string, unknown>;
-    const q = typeof raw.q === "string" ? raw.q.trim().slice(0, CHAT_INPUT_MAX) : "";
-    if (!q) throw new Error("Enter a search");
-    const context: AiContextItem[] = [];
-    const seen = new Set<string>();
-    for (const item of Array.isArray(raw.context) ? raw.context.slice(0, AI_MAX_CONTEXT) : []) {
-      const clean = cleanContextItem(item);
-      if (!clean || seen.has(clean.url)) continue;
-      seen.add(clean.url);
-      context.push(clean);
-    }
-    const requested = matchLang(typeof raw.lang === "string" ? raw.lang : "");
-    return { q, context, history: cleanChatHistory(raw.history), model: aiChoiceOf(raw.model), ...(requested ? { lang: requested } : {}) };
-  })
+  .validator(readAnswerRequest)
   .handler(async ({ data }): Promise<AiAnswer> => {
     // The answer is always written in the page language, English included.
     const lang = data.lang ?? (await preferredLang());
