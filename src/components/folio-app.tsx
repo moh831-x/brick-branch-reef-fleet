@@ -1,4 +1,4 @@
-import { Fragment, createContext, useCallback, useContext, useEffect, useId, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
+import { Fragment, useCallback, useContext, useEffect, useId, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import { ArrowUp, ArrowUpRight, Check, Copy, MessageSquare, BookOpen, ChevronDown, ChevronLeft, ChevronRight, Clock, Compass, Globe, ImageIcon, Pause, Play, RotateCw, Search, Share, Sparkles, Square, TrendingUp, Volume2, X } from "lucide-react";
 import type { FolioSearch } from "@/routes/index";
@@ -39,6 +39,8 @@ import {
 } from "@/lib/ai.shared";
 import { SiteFooter } from "@/components/site-footer";
 import { fill, sourceLabel, type UiCopy } from "@/lib/ui-copy";
+import { ChatInputContext, type ImageInputTarget } from "@/lib/chat-input-context";
+import { imageCopy } from "@/lib/image-copy";
 import { chatCopy } from "@/lib/chat-copy";
 import { CHAT_INPUT_MAX, type ChatMessage } from "@/lib/chat.shared";
 import { questionCopy } from "@/lib/question-copy";
@@ -175,9 +177,6 @@ function formatTook(ms: number): string {
   return `${(ms / 1000).toFixed(1)} s`;
 }
 
-type ChatInputBridge = { register: (send: ((question: string) => void) | null) => void; setBusy: (busy: boolean) => void };
-const ChatInputContext = createContext<ChatInputBridge | null>(null);
-
 export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPayload | null }) {
   const navigate = useNavigate({ from: "/" });
   const loading = useRouterState({ select: (state) => state.isLoading });
@@ -190,11 +189,24 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
   const chatSend = useRef<((question: string) => void) | null>(null);
   const [chatReady, setChatReady] = useState(false);
   const [chatBusy, setChatBusy] = useState(false);
+  const [imageTarget, setImageTarget] = useState<ImageInputTarget | null>(null);
+  const imageInput = useRef<ImageInputTarget | null>(null);
+  const activateImage = useCallback((target: ImageInputTarget) => {
+    if (imageInput.current?.id !== target.id) { setDraft(target.initial); setOpen(false); inputRef.current?.focus(); }
+    imageInput.current = target;
+    setImageTarget(target);
+  }, []);
+  const closeImage = useCallback((id: string) => {
+    if (imageInput.current?.id !== id) return;
+    imageInput.current = null;
+    setImageTarget(null);
+    setDraft("");
+  }, []);
   const registerChat = useCallback((send: ((question: string) => void) | null) => {
     const starting = send && !chatSend.current;
     chatSend.current = send;
     setChatReady(Boolean(send));
-    if (starting) { setDraft(""); setOpen(false); }
+    if (starting && !imageInput.current) { setDraft(""); setOpen(false); }
     if (!send) setChatBusy(false);
   }, []);
   const [sources, setSources] = useState<Sources>(() => sourcesFrom(search));
@@ -247,14 +259,14 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
 
   useEffect(() => {
     const q = draft.trim();
-    if (chatReady || !open || q.length < 2) return;
+    if (chatReady || imageTarget || !open || q.length < 2) return;
     const handle = window.setTimeout(() => {
       suggestQueries({ data: { q, lang: uiLang } })
         .then((rows) => setSuggestions(rows))
         .catch(() => setSuggestions([]));
     }, 180);
     return () => window.clearTimeout(handle);
-  }, [draft, open, uiLang, chatReady]);
+  }, [draft, open, uiLang, chatReady, imageTarget]);
 
   useEffect(() => {
     let cancelled = false;
@@ -401,6 +413,11 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
 
   function onSubmit(event: FormEvent) {
     event.preventDefault();
+    if (imageInput.current) {
+      const target = imageInput.current;
+      if (target.available && !target.busy && draft.trim()) target.send(draft.trim());
+      return;
+    }
     if (chatReady && chatSend.current) {
       const question = draft.trim();
       if (!question || chatBusy) return;
@@ -450,7 +467,7 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
     });
   }
 
-  const showMenu = !chatReady && open && menu.length > 0;
+  const showMenu = !imageTarget && !chatReady && open && menu.length > 0;
 
   function goHome() {
     setDraft("");
@@ -461,7 +478,7 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
   const searchForm = (
     <form onSubmit={onSubmit} className="relative" role="search">
       <label htmlFor="folio-q" className="sr-only">
-        {chatReady ? chatCopy(uiLang).placeholder : copy.search}
+        {imageTarget?.placeholder ?? (chatReady ? chatCopy(uiLang).placeholder : copy.search)}
       </label>
       <div
         className="flex min-h-14 items-center gap-2 rounded-2xl border border-line bg-surface px-3 focus-within:border-accent"
@@ -472,7 +489,7 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
           inputRef.current?.focus();
         }}
       >
-        <Search className="size-5 shrink-0 text-muted" aria-hidden="true" />
+        {imageTarget ? <ImageIcon className="size-5 shrink-0 text-accent" aria-hidden="true" /> : <Search className="size-5 shrink-0 text-muted" aria-hidden="true" />}
         <input
           ref={inputRef}
           id="folio-q"
@@ -485,8 +502,8 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
           onFocus={() => setOpen(true)}
           onBlur={() => window.setTimeout(() => setOpen(false), 140)}
           onKeyDown={onKeyDown}
-          maxLength={chatReady ? CHAT_INPUT_MAX : 180}
-          placeholder={chatReady ? chatCopy(uiLang).placeholder : copy.search}
+          maxLength={imageTarget ? 1000 : chatReady ? CHAT_INPUT_MAX : 180}
+          placeholder={imageTarget?.placeholder ?? (chatReady ? chatCopy(uiLang).placeholder : copy.search)}
           dir="auto"
           autoComplete="off"
           enterKeyHint="search"
@@ -522,8 +539,8 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
         />
         <button
           type="submit"
-          disabled={!draft.trim() || chatBusy}
-          aria-label={copy.search}
+          disabled={!draft.trim() || (imageTarget ? imageTarget.busy || !imageTarget.available : chatBusy)}
+          aria-label={imageTarget ? imageCopy(uiLang).create : chatReady ? chatCopy(uiLang).send : copy.search}
           className="inline-flex size-11 shrink-0 items-center justify-center rounded-full bg-ink text-bg transition-transform duration-150 ease-out active:scale-[0.96] disabled:opacity-40"
         >
           <ArrowUp className="size-4" />
@@ -644,7 +661,7 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
   );
 
   return (
-    <ChatInputContext.Provider value={{ register: registerChat, setBusy: setChatBusy }}>
+    <ChatInputContext.Provider value={{ register: registerChat, setBusy: setChatBusy, activateImage, closeImage, activeImageId: imageTarget?.id ?? null }}>
     <div className="min-h-screen">
       <div className="fixed inset-x-0 top-0 z-30 h-0.5" aria-hidden="true">
         {loading ? <div className="folio-bar h-full w-1/3 bg-accent" /> : null}

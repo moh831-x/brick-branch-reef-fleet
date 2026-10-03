@@ -13,5 +13,17 @@ const labels: Record<UiLang, readonly string[]> = {
 };
 export function imageCopy(lang: UiLang) {
   const [create, prompt, shape, square, landscape, portrait, context, creating, save, generated, close, error, limited, unconfigured, blocked, hint] = labels[lang];
-  return { create, prompt, shape, square, landscape, portrait, context, creating, save, generated, close, error, limited, unconfigured, blocked, hint };
+  const sharedInput: Record<UiLang, string> = {
+    "en-US": "Edit your image description in the search bar, then press its send button. Close to return to questions.",
+    "bn-BD": "সার্চ বারে ছবির বর্ণনা লিখে পাঠান বোতাম চাপুন। প্রশ্নে ফিরতে বন্ধ করুন।",
+    "hi-IN": "सर्च बार में चित्र का वर्णन लिखें और भेजें बटन दबाएँ। प्रश्नों पर लौटने के लिए बंद करें।",
+    "ar-SA": "عدّل وصف الصورة في شريط البحث، ثم اضغط زر الإرسال. أغلق للعودة إلى الأسئلة.",
+    "es-ES": "Edita la descripción en la barra de búsqueda y pulsa enviar. Cierra para volver a las preguntas.",
+    "fr-FR": "Modifiez la description dans la barre de recherche, puis envoyez. Fermez pour revenir aux questions.",
+    "zh-CN": "在搜索栏编辑图片描述，然后点击发送。关闭后可继续提问。",
+    "ja-JP": "検索バーで画像の説明を編集して送信してください。閉じると質問に戻ります。",
+    "pt-BR": "Edite a descrição na barra de pesquisa e envie. Feche para voltar às perguntas.",
+    "de-DE": "Bearbeite die Bildbeschreibung in der Suchleiste und sende sie. Schließe, um zu Fragen zurückzukehren.",
+  };
+  return { sharedInput: sharedInput[lang], create, prompt, shape, square, landscape, portrait, context, creating, save, generated, close, error, limited, unconfigured, blocked, hint };
 }
