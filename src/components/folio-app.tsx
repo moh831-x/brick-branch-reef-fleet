@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
-import { ArrowUp, ArrowUpRight, Check, Copy, MessageSquare, BookOpen, ChevronDown, ChevronLeft, ChevronRight, Clock, Compass, Globe, ImageIcon, Pause, Play, RotateCw, Search, Share, Sparkles, Square, TrendingUp, Volume2, X } from "lucide-react";
+import { ArrowUp, ArrowUpRight, Check, Copy, ThumbsUp, ThumbsDown, MessageSquare, BookOpen, ChevronDown, ChevronLeft, ChevronRight, Clock, Compass, Globe, ImageIcon, Pause, Play, RotateCw, Search, Share, Sparkles, Square, TrendingUp, Volume2, X } from "lucide-react";
 import type { FolioSearch } from "@/routes/index";
 import {
   listAiProviders,
@@ -37,7 +37,7 @@ import {
 } from "@/lib/ai.shared";
 import { SiteFooter } from "@/components/site-footer";
 import { fill, sourceLabel, type UiCopy } from "@/lib/ui-copy";
-import { chatCopy } from "@/lib/chat-copy";
+import { chatCopy, followUpPrompts } from "@/lib/chat-copy";
 import { CHAT_INPUT_MAX, type ChatMessage } from "@/lib/chat.shared";
 import { questionCopy } from "@/lib/question-copy";
 import { AnswerCode } from "@/components/answer-code";
@@ -526,7 +526,7 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
         {barPlaceholder}
       </label>
       <div
-        className="flex min-h-14 items-center gap-2 rounded-2xl border border-line bg-surface px-3 focus-within:border-accent"
+        className={`flex items-center gap-2 rounded-3xl border border-line bg-surface px-3 focus-within:border-accent ${onResults ? "min-h-24 flex-wrap py-2" : "min-h-14"}`}
         onMouseDown={(event) => {
           const target = event.target as HTMLElement;
           if (target.closest("button, input, textarea")) return;
@@ -572,7 +572,7 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
           aria-expanded={showMenu}
           aria-controls={listId}
           aria-autocomplete="list"
-          className="block max-h-40 min-h-12 min-w-0 flex-1 resize-none bg-transparent py-3 text-base leading-6 text-ink outline-none placeholder:text-muted"
+          className={`block max-h-40 min-h-12 min-w-0 flex-1 resize-none bg-transparent py-3 text-base leading-6 text-ink outline-none placeholder:text-muted ${onResults ? "order-first basis-full" : ""}`}
         />
         {draft ? (
           <button
@@ -592,6 +592,7 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
           models={aiModels}
           selected={aiModel && Array.isArray(aiModels) ? selectedAiModel(aiModel, aiModels.filter((row) => row.available).map((row) => row.id)) : aiModel}
           compact
+          above={onResults}
           copy={copy}
           onOpenChange={(next) => {
             if (next) setOpen(false);
@@ -611,7 +612,7 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
         <div
           id={listId}
           role="listbox"
-          className="absolute right-0 left-0 z-30 mt-2 max-h-[70vh] overflow-y-auto rounded-2xl border border-line bg-surface"
+          className={`absolute right-0 left-0 z-30 max-h-[50vh] overflow-y-auto rounded-2xl border border-line bg-surface ${onResults ? "bottom-full mb-2" : "mt-2"}`}
         >
           {typing ? (
             suggestions.map((item, index) => (
@@ -714,7 +715,7 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
   );
 
   const sourcePills = (
-    <div className={following ? "flex gap-2 overflow-x-auto pb-1" : "flex flex-wrap gap-2"}>
+    <div className={onResults ? "flex shrink-0 gap-2 whitespace-nowrap pb-1" : "flex flex-wrap gap-2"}>
       {(Object.keys(SOURCE_META) as PillId[]).map((key) => (
         <SourcePill key={key} id={key} on={sources[key]} copy={copy} onToggle={() => toggle(key)} />
       ))}
@@ -728,25 +729,20 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
         {loading ? <div className="folio-bar h-full w-1/3 bg-accent" /> : null}
       </div>
       {onResults ? (
-        <header
-          className={`fixed inset-x-0 top-0 z-20 border-b border-line bg-bg transition-transform duration-200 ease-out ${
-            !following && chrome === "hidden" && !open ? "-translate-y-full" : "translate-y-0"
-          }`}
-        >
-          <div className="mx-auto flex max-w-6xl flex-col px-4 py-3 sm:px-6">
-            <button
-              type="button"
-              onClick={goHome}
-              className={`w-fit font-display text-2xl tracking-tight text-ink transition-transform duration-150 ease-out active:scale-[0.96] ${
-                !following && chrome === "search" && !open ? "hidden" : ""
-              }`}
-            >
-              Folio
-            </button>
-            <div className={!following && chrome === "search" && !open ? "" : "pt-4"}>{searchForm}</div>
-            <div className={!following && chrome === "search" && !open ? "hidden" : "pt-4"}>{sourcePills}</div>
+        <>
+          <header className="border-b border-line bg-bg px-4 py-3 sm:px-6">
+            <div className="mx-auto flex max-w-3xl items-center justify-between gap-4">
+              <button type="button" onClick={goHome} className="min-h-11 font-display text-2xl text-ink">Folio</button>
+              <LanguagePicker />
+            </div>
+          </header>
+          <div className="fixed inset-x-0 bottom-0 z-30 bg-bg px-3 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+            <div className="mx-auto max-w-3xl">
+              {searchForm}
+              <div className="mt-2 flex gap-2 overflow-x-auto pb-1">{sourcePills}</div>
+            </div>
           </div>
-        </header>
+        </>
       ) : (
         <>
         <header className="flex min-h-screen flex-col items-center bg-bg px-4 pt-[18vh]">
@@ -791,7 +787,7 @@ export function FolioApp({ search, data }: { search: FolioSearch; data: SearchPa
         </>
       )}
       {onResults ? (
-        <main className="mx-auto max-w-6xl px-4 pt-52 pb-8 sm:px-6 sm:pb-10">
+        <main className="mx-auto max-w-3xl px-4 pt-6 pb-64 sm:px-6">
           <Results
             query={query}
             data={data}
@@ -1455,7 +1451,7 @@ function AiAnswerCard({
     <section
       aria-labelledby="ai-answer"
       aria-busy={pending}
-      className="rounded-3xl border border-line bg-surface p-4 sm:p-5"
+      className="py-4 sm:py-5"
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 id="ai-answer" className="flex items-center gap-2 font-display text-xl text-ink">
@@ -1501,25 +1497,7 @@ function AiAnswerCard({
               label={copy.listenAnswer}
               text={answer.parts.map((part) => ("text" in part ? part.text : " ")).join("").replace(/\s+/g, " ").trim()}
             />
-            {answer.citations.length > 0 ? (
-              <ol className="mt-4 grid grid-cols-[minmax(0,1fr)] gap-1 border-t border-line pt-3">
-                {answer.citations.map((cite) => (
-                  <li key={cite.n}>
-                    <SelectableLink href={cite.url} className="flex min-h-11 items-center gap-2 text-sm text-ink hover:text-accent">
-                      <span className="grid size-6 shrink-0 place-items-center rounded-full bg-accent-soft text-xs font-medium text-accent tabular-nums">
-                        {cite.n}
-                      </span>
-                      <SiteLogo url={cite.url} />
-                      <span className="min-w-0 truncate">{cite.title}</span>
-                      <span className="hidden shrink-0 text-xs text-muted sm:inline">
-                        {cite.source === "images" ? <span>{copy.image} · </span> : null}
-                        {siteHost(cite.url) || sourceLabel(copy, cite.source)}
-                      </span>
-                    </SelectableLink>
-                  </li>
-                ))}
-              </ol>
-            ) : null}
+            <AnswerSources citations={answer.citations} copy={copy} />
             <p className="mt-3 text-xs leading-relaxed text-muted">
               {fallbackFailures(answer).length > 0 ? (
                 <>
@@ -1557,7 +1535,11 @@ function AiAnswerCard({
           </>
         )}
       </div>
-      {answer?.status === "ok" ? <AnswerCopy text={answer.text} lang={lang} /> : null}
+      {answer?.status === "ok" ? <div className="flex flex-wrap items-center gap-1">
+        <AnswerCopy text={answer.text} lang={lang} />
+        <AnswerFeedback key={answer.text} text={answer.text} copy={copy} lang={lang} />
+        <button type="button" onClick={() => setAttempt(value => value + 1)} aria-label={copy.tryAgain} title={copy.tryAgain} className="mt-2 grid size-11 place-items-center rounded-full text-muted hover:bg-accent-soft hover:text-ink"><RotateCw className="size-4" aria-hidden="true" /></button>
+      </div> : null}
       <AnswerImage key={normalized} query={query} answer={answer?.status === "ok" ? answer.text : undefined} lang={lang} />
       {answer?.status === "ok" ? <ChatFollowUps key={key} query={query} initial={answer} context={pickAiContext({ web: sources.web ? data?.web : undefined, wiki: sources.wiki ? data?.wiki : undefined, grok: sources.grok ? data?.grok : undefined, images: sources.images ? data?.images : undefined })} model={selected} lang={lang} copy={copy} /> : null}
     </section>
@@ -1598,6 +1580,7 @@ function AiModelPicker({
   selected,
   onPick,
   compact = false,
+  above = false,
   copy,
   onOpenChange,
 }: {
@@ -1605,6 +1588,7 @@ function AiModelPicker({
   selected: string | undefined;
   onPick: (id: string | undefined) => void;
   compact?: boolean;
+  above?: boolean;
   copy: UiCopy;
   onOpenChange?: (open: boolean) => void;
 }) {
@@ -1639,7 +1623,7 @@ function AiModelPicker({
   const shown = rows.filter((model) => !query || model.label.toLowerCase().includes(query));
 
   return (
-    <div ref={root} className={compact ? "relative shrink-0" : "relative mt-3"}>
+    <div ref={root} className={compact ? "relative ms-auto shrink-0" : "relative mt-3"}>
       <button
         type="button"
         aria-haspopup="listbox"
@@ -1658,7 +1642,7 @@ function AiModelPicker({
         <ChevronDown className={`size-3.5 shrink-0 text-muted transition-transform ${open ? "rotate-180" : ""}`} aria-hidden="true" />
       </button>
       {open ? (
-        <div className="absolute top-full end-0 z-40 mt-2 w-72 max-w-[calc(100vw-2rem)] rounded-2xl border border-line bg-surface p-2 shadow-lg">
+        <div className={`absolute end-0 z-40 w-72 max-w-[calc(100vw-2rem)] rounded-2xl border border-line bg-surface p-2 shadow-lg ${above ? "bottom-full mb-2" : "top-full mt-2"}`}>
           <label className="sr-only" htmlFor="ai-model-filter">
             {copy.searchModels}
           </label>
@@ -2944,6 +2928,53 @@ function Skeleton() {
   );
 }
 
+function AnswerSources({ citations, copy }: { citations: Extract<AiAnswer, { status: "ok" }>["citations"]; copy: UiCopy }) {
+  if (!citations.length) return null;
+  return <details className="group mt-3">
+    <summary className="flex min-h-11 w-fit cursor-pointer list-none items-center gap-2 rounded-full border border-line bg-bg px-3 text-sm text-ink hover:bg-accent-soft [&::-webkit-details-marker]:hidden">
+      <span className="flex items-center -space-x-1" aria-hidden="true">{citations.slice(0, 3).map(cite => <SiteLogo key={cite.n} url={cite.url} />)}</span>
+      <span>{fill(copy.answerSources, { count: String(citations.length) })}</span>
+      <ChevronDown className="size-3.5 transition-transform group-open:rotate-180" aria-hidden="true" />
+    </summary>
+              <ol className="mt-4 grid grid-cols-[minmax(0,1fr)] gap-1 border-t border-line pt-3">
+                {citations.map((cite) => (
+                  <li key={cite.n}>
+                    <SelectableLink href={cite.url} className="flex min-h-11 items-center gap-2 text-sm text-ink hover:text-accent">
+                      <span className="grid size-6 shrink-0 place-items-center rounded-full bg-accent-soft text-xs font-medium text-accent tabular-nums">
+                        {cite.n}
+                      </span>
+                      <SiteLogo url={cite.url} />
+                      <span className="min-w-0 truncate">{cite.title}</span>
+                      <span className="hidden shrink-0 text-xs text-muted sm:inline">
+                        {cite.source === "images" ? <span>{copy.image} · </span> : null}
+                        {siteHost(cite.url) || sourceLabel(copy, cite.source)}
+                      </span>
+                    </SelectableLink>
+                  </li>
+                ))}
+              </ol>
+  </details>;
+}
+
+/** Feedback is a private, page-local marker; it is not sent to model providers. */
+function AnswerFeedback({ text, copy, lang }: { text: string; copy: UiCopy; lang: UiLang }) {
+  const [vote, setVote] = useState<"up" | "down" | null>(null);
+  const [shared, setShared] = useState(false);
+  const [failed, setFailed] = useState(false);
+  async function share() {
+    try {
+      await navigator.clipboard.writeText(`${text}\n\n${window.location.href}`);
+      setShared(true); setFailed(false);
+    } catch { setFailed(true); }
+  }
+  return <>
+    <button type="button" onClick={share} aria-label={shared ? chatCopy(lang).copied : copy.shareResults} title={copy.shareResults} className="mt-2 grid size-11 place-items-center rounded-full text-muted hover:bg-accent-soft">{shared ? <Check className="size-4" /> : <Share className="size-4" />}</button>
+    <button type="button" aria-label={copy.helpfulAnswer} title={copy.helpfulAnswer} aria-pressed={vote === "up"} onClick={() => setVote(vote === "up" ? null : "up")} className="mt-2 grid size-11 place-items-center rounded-full text-muted hover:bg-accent-soft aria-pressed:bg-accent-soft aria-pressed:text-accent"><ThumbsUp className="size-4" /></button>
+    <button type="button" aria-label={copy.unhelpfulAnswer} title={copy.unhelpfulAnswer} aria-pressed={vote === "down"} onClick={() => setVote(vote === "down" ? null : "down")} className="mt-2 grid size-11 place-items-center rounded-full text-muted hover:bg-accent-soft aria-pressed:bg-accent-soft aria-pressed:text-accent"><ThumbsDown className="size-4" /></button>
+    {failed ? <span role="status" className="text-xs text-muted">{copyFailure[lang]}</span> : null}
+  </>;
+}
+
 function AnswerCopy({ text, lang }: { text: string; lang: UiLang }) {
   const [copied, setCopied] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -3045,7 +3076,8 @@ function ChatFollowUps({ query, initial, context, model, lang, copy }: {
           {turn.trace ? <WorkSummary trace={turn.trace} lang={lang} copy={copy} /> : null}
           <div className="mt-2 min-w-0 text-base leading-relaxed"><AiText parts={turn.answer.parts} citations={turn.answer.citations} copy={copy} lang={lang} /></div>
           <ReadAloud resetKey={`${index}:${turn.question}`} lang={lang} ready copy={copy} label={copy.listenAnswer} text={turn.answer.parts.map(part => "text" in part ? part.text : " ").join("")} />
-          <AnswerCopy text={turn.answer.text} lang={lang} />
+          <AnswerSources citations={turn.answer.citations} copy={copy} />
+          <div className="flex items-center gap-1"><AnswerCopy text={turn.answer.text} lang={lang} /><AnswerFeedback key={turn.answer.text} text={turn.answer.text} copy={copy} lang={lang} /><button type="button" disabled={pending} onClick={() => void ask(turn.question, turns.slice(0, index))} aria-label={copy.tryAgain} title={copy.tryAgain} className="mt-2 grid size-11 place-items-center rounded-full text-muted hover:bg-accent-soft disabled:opacity-50"><RotateCw className="size-4" aria-hidden="true" /></button></div>
           <AnswerImage query={turn.question} answer={turn.answer.text} lang={lang} />
           <p className="mt-2 text-xs text-muted">{fill(context.length ? copy.writtenBy : questionCopy(lang).writtenBy, { provider: aiProviderLabel(turn.answer.provider), model: turn.answer.model })}</p>
         </> : <>
@@ -3055,10 +3087,13 @@ function ChatFollowUps({ query, initial, context, model, lang, copy }: {
       </div>)}
     </div>
     <div ref={end} />
-    {/* No second text box: this sends the reader to the one search bar, in follow-up mode. */}
-    <button type="button" onClick={() => bridge?.activate(chatId)} disabled={!bridge} className="mt-5 flex min-h-11 w-full items-center gap-2 rounded-2xl border border-line bg-bg px-4 text-start text-sm text-muted hover:border-accent hover:text-ink">
-      <ArrowUp className="size-4 shrink-0 text-accent" aria-hidden="true" /><span className="min-w-0 flex-1">{labels.placeholder}</span><span className="hidden shrink-0 text-xs sm:inline">{labels.inBar}</span>
-    </button>
+    <div className="mt-5 grid gap-1">
+      {followUpPrompts[lang].map(prompt => <button key={prompt} type="button" disabled={pending}
+        onClick={() => { bridge?.activate(chatId); void ask(prompt, latest.current); }}
+        className="flex min-h-11 items-center gap-3 rounded-xl px-2 text-start text-sm text-muted hover:bg-accent-soft hover:text-ink disabled:opacity-50">
+        <ArrowUpRight className="size-4 shrink-0" aria-hidden="true" /><span>{prompt}</span>
+      </button>)}
+    </div>
     <p className="mt-2 text-xs leading-relaxed text-muted">{labels.privacy}</p>
   </div>;
 }
